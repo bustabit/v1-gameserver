@@ -4,7 +4,6 @@ var uuid = require('uuid');
 var async = require('async');
 var lib = require('./lib');
 var pg = require('pg');
-var passwordHash = require('password-hash');
 
 var databaseUrl = process.env.DATABASE_URL;
 
@@ -100,27 +99,7 @@ function getClient(runner, callback) {
 
 }
 
-// returns a sessionId
-exports.createUser = function(username, password, email, callback) {
-    assert(username && password);
-    getClient(
-        function(client, callback) {
-            var hashedPassword = passwordHash.generate(password);
 
-            client.query('INSERT INTO users(username, email, password) VALUES($1, $2, $3) RETURNING id',
-                [username, email, hashedPassword],
-                function(err, data) {
-                    if (err) return callback(err);
-
-                    assert(data.rows.length === 1);
-                    var user = data.rows[0];
-
-                    createSession(client, user.id, callback);
-                }
-            );
-        }
-    , callback);
-};
 
 exports.getUserByName = function(username, callback) {
     assert(username);
@@ -173,37 +152,7 @@ exports.updateEmail = function(userId, email, callback) {
 
 };
 
-exports.changeUserPassword = function(userId, password, callback) {
-    assert(userId && password);
-    var hashedPassword = passwordHash.generate(password);
-    query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, userId], function(err, res) {
-        if (err) return callback(err);
-        assert(res.rowCount === 1);
-        callback(null);
-    });
-};
 
-exports.validateUser = function(username, password, callback) {
-    assert(username && password);
-
-    query('SELECT id, password FROM users WHERE lower(username) = lower($1)', [username], function (err, data) {
-        if (err) return callback(err);
-
-        if (data.rows.length === 0) {
-            console.log('username ', username, ' not found...');
-            return callback('NO_USER');
-        }
-
-        var user = data.rows[0];
-
-        var verified = passwordHash.verify(password, user.password);
-        if (!verified) {
-            return callback('WRONG_PASSWORD');
-        }
-
-        callback(null, user.id);
-    });
-};
 
 exports.deleteUserSession = function(sessionId, callback) {
     assert(sessionId);
@@ -321,25 +270,6 @@ exports.getUserByRecoverId = function(recoverId, callback) {
     });
 };
 
-exports.changePasswordFromRecoverId = function(recoverId, password, callback) {
-    assert(recoverId && password && callback);
-    var hashedPassword = passwordHash.generate(password);
-
-    query("WITH t as (DELETE FROM recovery WHERE id = $2 AND created > NOW() - interval '24 hours' RETURNING *) UPDATE users SET password = $1 where id = (SELECT user_id FROM t) RETURNING *",
-        [hashedPassword, recoverId], function(err, res) {
-            if (err)
-                return callback(new Error('Unable to query changePasswordFromRecoverId -> recoverId: ' + recoverId, + 'password: ' + password + '\n' + err));
-
-            var data = res.rows;
-            if (data.length === 0)
-                return callback('USER_NOT_FOUND');
-
-            assert(data.length === 1);
-
-            callback(null, data[0]);
-        }
-    );
-};
 
 exports.placeBet = function(amount, userId, gameId, callback) {
     assert(typeof amount === 'number');

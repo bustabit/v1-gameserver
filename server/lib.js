@@ -1,5 +1,4 @@
 var assert = require('better-assert');
-var bitcoinjs = require('bitcoinjs-lib');
 var crypto = require('crypto');
 var encKey = process.env.ENC_KEY || 'devkey';
 
