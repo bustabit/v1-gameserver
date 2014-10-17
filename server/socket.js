@@ -2,7 +2,6 @@ var CBuffer = require('CBuffer');
 var socketio = require('socket.io');
 var database = require('./database');
 var lib = require('./lib');
-var withdraw = require('../server/withdraw.js');
 
 module.exports = function(server,game,chat) {
     var io = socketio(server);
@@ -33,6 +32,7 @@ module.exports = function(server,game,chat) {
 
     var shutdownfast = false;
     function onConnection(socket) {
+
         if (shutdownfast) {
             socket.emit('update');
             return;

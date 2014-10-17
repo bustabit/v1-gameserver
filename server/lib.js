@@ -72,17 +72,6 @@ exports.isEligibleForGiveAway = function(lastGiveAway) {
     return Math.round(60 - timeElapsed);
 };
 
-var derivedPubKey = process.env.BIP32_DERIVED_KEY;
-if (!derivedPubKey)
-    throw new Error('Must set env var BIP32_DERIVED_KEY');
-
-
-var hdNode = bitcoinjs.HDNode.fromBase58(derivedPubKey);
-
-exports.deriveAddress = function(index) {
-    return hdNode.derive(index).pubKey.getAddress().toString();
-};
-
 exports.formatSatoshis = function(n, decimals) {
     if (typeof decimals === 'undefined')
         decimals = 2;
@@ -119,7 +108,7 @@ exports.parseTimeString = function(str) {
 
     assert(num > 0);
     return num;
-}
+};
 
 exports.printTimeString = function(ms) {
     var days = Math.ceil(ms / (24*60*60*1000));
@@ -133,4 +122,4 @@ exports.printTimeString = function(ms) {
 
     var seconds = Math.ceil(ms / 1000);
     return '' + seconds + 's';
-}
+};

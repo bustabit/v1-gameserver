@@ -12,10 +12,10 @@ function GameHistory (gameTable) {
 
 GameHistory.prototype.addCompletedGame = function (game) {
     this.gameTable.unshift(game);
-}
+};
 
 GameHistory.prototype.getHistory = function () {
     return this.gameTable.toArray();
-}
+};
 
 module.exports = GameHistory;

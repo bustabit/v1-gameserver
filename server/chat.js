@@ -31,7 +31,7 @@ util.inherits(Chat, events.EventEmitter);
 
 Chat.prototype.getHistory = function () {
     return this.chatTable.toArray();
-}
+};
 
 Chat.prototype.say = function(socket, userInfo, message) {
     var self = this;
