@@ -17,7 +17,7 @@ var server;
 
 if (process.env.USE_HTTPS) {
     var options = {
-        key: fs.readFileSync(process.env.HTTPS_KEY || path.join(__dirname, '/key.pem')),
+        key: fs.readFileSync(process.env.HTTPS_KEY || path.join(__dirname, 'key.pem')),
         cert: fs.readFileSync(process.env.HTTPS_CERT || path.join(__dirname, 'cert.pem'))
     };
 
