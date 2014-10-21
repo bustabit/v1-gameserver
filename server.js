@@ -21,6 +21,10 @@ if (process.env.USE_HTTPS) {
         cert: fs.readFileSync(process.env.HTTPS_CERT || path.join(__dirname, 'cert.pem'))
     };
 
+    if (process.env.HTTPS_CA) {
+        options.ca = fs.readFileSync(process.env.HTTPS_CA);
+    }
+
     server = require('https').createServer(options).listen(port, function() {
         console.log('Listening on port ', port, ' on HTTPS!');
     });
