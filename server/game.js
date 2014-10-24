@@ -16,7 +16,6 @@ function Game(gameHistory) {
     var self = this;
 
     self.gameShuttingDown = false;
-    self.gameShuttingDownFast = false;
     self.pending = 0; // How many people are trying to join the game...
     self.seed = null;
     self.startTime; // time game started. If before game started, is an estimate...
@@ -35,7 +34,7 @@ function Game(gameHistory) {
 
     function runGame() {
 
-        if (self.gameShuttingDown || self.gameShuttingDownFast) {
+        if (self.gameShuttingDown) {
             console.log('Not creating next game, server shutting down..');
             return;
         }
@@ -96,17 +95,13 @@ function Game(gameHistory) {
 
 
     function runTick() {
-        if (self.gameShuttingDownFast) {
-            console.log('..aborting tick');
-            return;
-        }
 
         var elapsed = new Date() - self.startTime;
         var at = growthFunc(elapsed);
 
         self.runCashOuts(at);
 
-        if (self.forcePoint && self.forcePoint <= at && self.forcePoint < self.crashPoint) {
+        if (self.forcePoint <= at && self.forcePoint < self.crashPoint) {
             self.cashOutAll(self.forcePoint, function (err) {
                 console.log('Just forced cashed out everyone at: ', self.forcePoint, ' got err: ', err);
 
@@ -161,10 +156,8 @@ Game.prototype.updateAutoCashOut = function(user, amount) {
         return false;
 
     var elapsed = new Date() - self.startTime;
-    var at = growthFunc(elapsed);
 
-    var use = Math.max(at, amount);
-    play.autoCashOut = use;
+    play.autoCashOut = amount ? Math.max(growthFunc(elapsed), amount) : amount;
 
     return true;
 };
@@ -255,13 +248,13 @@ Game.prototype.getInfo = function() {
 };
 
 // Calls callback with (err, booleanIfAbleToJoin)
-// autoCashOut is nullable
 Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
     var self = this;
 
     assert(typeof user.id === 'number');
     assert(typeof user.username === 'string');
     assert(lib.isInt(betAmount));
+    assert(lib.isInt(autoCashOut) && autoCashOut >= 100);
 
     if (self.state !== 'STARTING' || self.blocking)
         return callback('GAME_IN_PROGRESS');
@@ -271,6 +264,8 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
 
     self.players[user.username] = { user: user, bet: betAmount, autoCashOut: autoCashOut, status: 'PENDING', playId: null };
     self.pending++;
+
+    console.log('User: ', user.username, ' placing ', betAmount, ' bet in ', self.gameId, ' with auto: ', autoCashOut);
 
     db.placeBet(betAmount, user.id, self.gameId, function(err, playId) {
         self.pending--;
@@ -296,7 +291,6 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
         callback(null);
     });
 };
-
 
 
 Game.prototype.doCashOut = function(play, at, callback) {
@@ -325,11 +319,7 @@ Game.prototype.doCashOut = function(play, at, callback) {
     db.cashOut(play.user.id, play.playId, won, function(err) {
         if (err) {
             console.log('[INTERNAL_ERROR] could not cash out: ', username, ' at ', at, ' in ', play, ' because: ', err);
-            callback(err);
-
-            // TODO: consider put them back in the game if its still running
-
-            return;
+            return callback(err);
         }
 
         callback(null);
@@ -350,13 +340,11 @@ Game.prototype.runCashOuts = function(at) {
 
         assert(play.status === 'PLAYING');
 
-        // autoCashOut can be null...
-        if (play.autoCashOut && play.autoCashOut <= at && play.autoCashOut <= self.crashPoint) {
-            self.doCashOut(play, play.autoCashOut, function (err) {
-                if (err) {
+        if (play.autoCashOut <= at && play.autoCashOut <= self.crashPoint) {
+
+            self.doCashOut(play, Math.min(self.forcePoint, play.autoCashOut || self.crashPoint), function (err) {
+                if (err)
                     console.log('[INTERNAL_ERROR] could not auto cashout ', playerUserName, ' at ', play.autoCashOut);
-                    return;
-                }
             });
             update = true;
         }
@@ -386,7 +374,7 @@ Game.prototype.setForcePoint = function() {
    });
 
    if (totalBet === 0) {
-       self.forcePoint = null; // the game can go until it crashes, there's no end.
+       self.forcePoint = Infinity; // the game can go until it crashes, there's no end.
    } else {
        var left = maxWin - totalCashedOut;
 
@@ -413,10 +401,10 @@ Game.prototype.cashOut = function(user, callback) {
     if (!play)
         return callback('NO_BET_PLACED');
 
-    if (play.autoCashOut && play.autoCashOut <= at)
+    if (play.autoCashOut <= at)
         at = play.autoCashOut;
 
-    if (self.forcePoint && self.forcePoint <= at)
+    if (self.forcePoint <= at)
         at = self.forcePoint;
 
 
@@ -492,27 +480,6 @@ Game.prototype.shutDown = function() {
     if (this.state === 'ENDED') {
         self.emit('shutdown');
     }
-};
-
-Game.prototype.shutDownFast = function() {
-    var self = this;
-    var elapsed = new Date() - self.startTime;
-    var at = growthFunc(elapsed);
-
-    self.gameShuttingDown = true;
-    self.gameShuttingDownFast = true;
-    self.emit('shuttingdown');
-
-    self.cashOutAll(at, function (err) {
-
-        console.log('Just cashed everyone out ', at, ' for shut down with error: ', err);
-
-        if (!err)
-            self.endGame();
-
-        self.emit('shutdownfast');
-    });
-
 };
 
 /// returns [ {playId: ?, user: ?, amount: ? }, ...]

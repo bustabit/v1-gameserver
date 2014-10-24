@@ -30,18 +30,7 @@ module.exports = function(server,game,chat) {
 
     io.on('connection', onConnection);
 
-    var shutdownfast = false;
     function onConnection(socket) {
-
-        if (shutdownfast) {
-            socket.emit('update');
-            return;
-        }
-
-        game.on('shutdownfast', function() {
-            shutdownfast = true;
-            socket.emit('update');
-        });
 
         socket.once('join', function(info, ack) {
             if (typeof ack !== 'function')
@@ -49,14 +38,6 @@ module.exports = function(server,game,chat) {
 
             if (typeof info !== 'object')
                 return sendError(socket, '[join] Invalid info');
-
-            var autoCashOut; // can be null
-            if (info.auto_cash_out) {
-                if (!lib.isInt(info.auto_cash_out) || info.auto_cash_out <= 100)
-                    return sendError(socket, '[join] Invalid auto cash out');
-
-                autoCashOut = info.auto_cash_out;
-            }
 
             var ott = info.ott;
             if (ott) {
@@ -88,7 +69,7 @@ module.exports = function(server,game,chat) {
                     loggedIn.moderator = loggedIn.userclass === 'admin' ||
                         loggedIn.userclass === 'moderator';
                 }
-                joined(socket, loggedIn, autoCashOut);
+                joined(socket, loggedIn);
             }
         });
 
@@ -96,7 +77,7 @@ module.exports = function(server,game,chat) {
 
     var clientCount = 0;
 
-    function joined(socket, loggedIn, autoCashOut) {
+    function joined(socket, loggedIn) {
         ++clientCount;
         console.log('Client joined: ', clientCount, ' - ', loggedIn ? loggedIn.username : '~guest~');
 
@@ -130,9 +111,9 @@ module.exports = function(server,game,chat) {
             if (amount > 1e7) // 1 BTC limit
                 return sendError(socket, '[place_bet] Max bet size is 0.1 BTC got: ' + amount);
 
-
             if (!autoCashOut)
-                autoCashOut = null;
+                return sendError(socket, '[place_bet] Must Send an autocashout with a bet');
+
             else if (!lib.isInt(autoCashOut) || autoCashOut < 100)
                 return sendError(socket, '[place_bet] auto_cashout problem');
 
@@ -239,14 +220,12 @@ module.exports = function(server,game,chat) {
             if (!loggedIn)
                 return sendError(socket, '[set_auto_cash_out] not logged in');
 
-            console.log(amount, typeof amount);
             if (!amount)
                 amount = null;
             else if (!lib.isInt(amount) || amount <= 100)
                 return sendError(socket, '[set_auto_cash_out] amount problem');
 
-            autoCashOut = amount;
-            game.updateAutoCashOut(loggedIn, autoCashOut);
+            game.updateAutoCashOut(loggedIn, amount);
         });
     }
 

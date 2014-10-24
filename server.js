@@ -45,10 +45,5 @@ database.getGameHistory(function(err,rows) {
     var game = new Game(gameHistory);
     var chat = new Chat();
 
-    process.on('SIGTERM', function() {
-        console.log('Got SIGTERM... triggering emergency shutdown');
-        game.shutDownFast();
-    });
-
     socket(server, game, chat);
 });
