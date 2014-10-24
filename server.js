@@ -1,4 +1,4 @@
-var assert = require('better-assert');
+var constants = require('constants');
 var fs = require('fs');
 var path = require('path');
 
@@ -7,7 +7,6 @@ var database = require('./server/database');
 var Game = require('./server/game');
 var Chat = require('./server/chat');
 var GameHistory = require('./server/game_history');
-var lib = require('./server/lib');
 
 var _ = require('lodash');
 
@@ -18,7 +17,9 @@ var server;
 if (process.env.USE_HTTPS) {
     var options = {
         key: fs.readFileSync(process.env.HTTPS_KEY || path.join(__dirname, 'key.pem')),
-        cert: fs.readFileSync(process.env.HTTPS_CERT || path.join(__dirname, 'cert.pem'))
+        cert: fs.readFileSync(process.env.HTTPS_CERT || path.join(__dirname, 'cert.pem')),
+        secureProtocol: 'SSLv23_method',
+        secureOptions: constants.SSL_OP_NO_SSLv3 | constants.SSL_OP_NO_SSLv2
     };
 
     if (process.env.HTTPS_CA) {
