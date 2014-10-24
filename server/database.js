@@ -303,12 +303,12 @@ exports.endGame = function(gameId, bonuses, callback) {
     assert(typeof gameId === 'number');
     assert(typeof callback === 'function');
 
-    var error = false;
 
     getClient(function(client, callback) {
+        var error = false;
 
         var tasks = [function(callback) {
-            if (error) return callback(new Error('aborted'));
+            if (error) return callback(new Error('end game aborted'));
             client.query('UPDATE games SET ended = true WHERE id = $1', [gameId], callback);
         }];
 
@@ -319,7 +319,7 @@ exports.endGame = function(gameId, bonuses, callback) {
 
             tasks.push(
                 function(callback) {
-                    if (error) return callback(new Error('aborted'));
+                    if (error) return callback(new Error('update bonus in end game aborted'));
                         client.query('UPDATE plays SET bonus = $1 WHERE id = $2', [bonus.amount, bonus.playId], callback)
                 }
             );
