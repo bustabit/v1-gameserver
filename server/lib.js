@@ -78,7 +78,7 @@ exports.formatSatoshis = function(n, decimals) {
     return (n/100).toFixed(decimals).toString().replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1,");
 };
 
-exports.isInt = function isInteger (nVal) {
+exports.isInt = function(nVal) {
     return typeof nVal === "number" && isFinite(nVal) && nVal > -9007199254740992 && nVal < 9007199254740992 && Math.floor(nVal) === nVal;
 };
 

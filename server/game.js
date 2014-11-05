@@ -6,6 +6,7 @@ var util = require('util');
 var cryptoRand = require('crypto-rand');
 var _ = require('lodash');
 var lib = require('./lib');
+var SortedArray = require('./sorted_array');
 
 var maxWin = process.env.MAX_LOSS ? parseInt(process.env.MAX_LOSS) : 2e8; // The max loss in a single game, in satoshis
 var tickRate = 150; // ping the client every X miliseconds
@@ -16,7 +17,6 @@ function Game(gameHistory) {
     var self = this;
 
     self.gameShuttingDown = false;
-    self.pending = 0; // How many people are trying to join the game...
     self.seed = null;
     self.startTime; // time game started. If before game started, is an estimate...
     self.crashPoint; // when the game crashes, 0 means instant crash
@@ -24,8 +24,10 @@ function Game(gameHistory) {
 
     self.forcePoint = null; // The point we force terminate the game
 
-    self.state = 'ENDED'; // 'STARTING' | 'IN_PROGRESS' |  'ENDED'
-    self.blocking = false; // the game is transitioning to inprogress, so blocking new join attempts
+    self.state = 'ENDED'; // 'STARTING' | 'BLOCKING' | 'IN_PROGRESS' |  'ENDED'
+    self.pending = {}; // Set of players pending a joined
+    self.joined = new SortedArray(); // A list of joins, before the game is in progress
+
     self.players = {}; // An object of userName ->  { playId: ..., autoCashOut: .... }
     self.gameId = null;
     self.gameHistory = gameHistory;
@@ -41,7 +43,6 @@ function Game(gameHistory) {
 
         var crashPoint = genGameCrash();
         var seed = lib.randomHex(16);
-
 
         db.createGame(crashPoint, seed, function (err, gameId) {
             if (err) {
@@ -64,24 +65,41 @@ function Game(gameHistory) {
                 time_till_start: restartTime
             });
 
-            setTimeout(startGame, restartTime);
+            setTimeout(blockGame, restartTime);
         });
     }
 
-    function startGame() {
-        if (self.pending > 0) {
-            self.blocking = true; // Stop anyone else trying to join..
-            console.log('Table  has ', self.pending, ' bet.. delaying by 100ms');
-            return setTimeout(startGame, 100);
-        }
+    function blockGame() {
+        self.state = 'BLOCKING'; // we're waiting for pending bets..
 
+        loop();
+        function loop() {
+            var l = Object.keys(self.pending).length;
+            if (l > 0) {
+                console.log('Delaying game by 100ms for ', l , ' joins');
+                return setTimeout(loop, 100);
+            }
+            startGame();
+        }
+    }
+
+    function startGame() {
         self.state = 'IN_PROGRESS';
-        self.blocking = false;
         self.startTime = new Date();
 
-        self.setForcePoint();
+        var bets = {};
+        var arr = self.joined.getArray();
+        for (var i = 0; i < arr.length; ++i) {
+            var a = arr[i];
+            bets[a.user.username] = a.bet;
+            self.players[a.user.username] = a;
+        }
 
-        self.emit('game_started', { created: self.startTime });  // NOTE: this is approximate, and db value will be earlier
+        self.joined.clear();
+
+        self.emit('game_started', bets);
+
+        self.setForcePoint();
 
         callTick(0);
     }
@@ -115,25 +133,21 @@ function Game(gameHistory) {
         if (at > self.crashPoint)
             crashGame();
         else
-            tick(elapsed, at);
+            tick(elapsed);
     }
 
     function crashGame() {
         // oh noes, we crashed!
         self.endGame();
 
-        if (self.gameShuttingDown) {
-            self.emit('shutdown');
-        } else {
-            setTimeout(runGame, afterCrashTime);
-        }
+        if (self.gameShuttingDown)
+            return self.emit('shutdown');
+
+        setTimeout(runGame, afterCrashTime);
     }
 
-    function tick(elapsed, at) {
-        self.emit('game_tick', {
-            elapsed: elapsed
-        });
-
+    function tick(elapsed) {
+        self.emit('game_tick', elapsed);
         callTick(elapsed);
     }
 
@@ -144,7 +158,7 @@ util.inherits(Game, events.EventEmitter);
 
 Game.prototype.updateAutoCashOut = function(user, amount) {
     assert(user.username);
-    assert(amount == null || Number.isFinite(amount));
+    assert( Number.isFinite(amount));
     var self = this;
 
     if (this.state === 'ENDED')
@@ -157,7 +171,7 @@ Game.prototype.updateAutoCashOut = function(user, amount) {
 
     var elapsed = new Date() - self.startTime;
 
-    play.autoCashOut = amount ? Math.max(growthFunc(elapsed), amount) : amount;
+    play.autoCashOut = Math.max(growthFunc(elapsed), amount);
 
     return true;
 };
@@ -189,12 +203,12 @@ Game.prototype.endGame = function() {
         seed: self.seed
     });
 
-    self.gameHistory.addCompletedGame(
-      { game_id: gameId,
+    self.gameHistory.addCompletedGame({
+        game_id: gameId,
         game_crash: self.crashPoint,
         created: self.startTime,
         player_info: playerInfo
-      });
+    });
 
     db.endGame(gameId, bonuses, function(err) {
         if (err)
@@ -202,7 +216,6 @@ Game.prototype.endGame = function() {
     });
 
     self.state = 'ENDED';
-    assert(!self.blocking);
 };
 
 Game.prototype.getInfo = function() {
@@ -211,9 +224,6 @@ Game.prototype.getInfo = function() {
 
     for (var username in this.players) {
         var record = this.players[username];
-
-        if (record.status === 'PENDING')
-            continue;
 
         assert(lib.isInt(record.bet));
         var info = {
@@ -238,7 +248,8 @@ Game.prototype.getInfo = function() {
         // if the game is running, elapsed is how long its running for
         /// if the game is ended, elapsed is how long since the game started
         elapsed: Date.now() - this.startTime,
-        created: this.startTime
+        created: this.startTime,
+        joined: this.joined.getArray().map(function(u) { return u.user.username; })
     };
 
     if (this.state === 'ENDED')
@@ -256,39 +267,37 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
     assert(lib.isInt(betAmount));
     assert(lib.isInt(autoCashOut) && autoCashOut >= 100);
 
-    if (self.state !== 'STARTING' || self.blocking)
+    if (self.state !== 'STARTING')
         return callback('GAME_IN_PROGRESS');
 
-    if (lib.hasOwnProperty(self.players, user.username))
+    if (lib.hasOwnProperty(self.pending, user.username) || lib.hasOwnProperty(self.players, user.username))
         return callback('ALREADY_PLACED_BET');
 
-    self.players[user.username] = { user: user, bet: betAmount, autoCashOut: autoCashOut, status: 'PENDING', playId: null };
-    self.pending++;
-
+    self.pending[user.username] = user.username;
     console.log('User: ', user.username, ' placing ', betAmount, ' bet in ', self.gameId, ' with auto: ', autoCashOut);
 
     db.placeBet(betAmount, user.id, self.gameId, function(err, playId) {
-        self.pending--;
+        delete self.pending[user.username];
 
         if (err) {
-            delete self.players[user.username];
             if (err.code == '23514') // constraint violation (it's withdrawing less than 0)
                 return callback('NOT_ENOUGH_MONEY');
 
             console.log('[INTERNAL_ERROR] could not play game, got error: ', err);
-            return callback(err);
+            callback(err);
+        } else {
+            assert(playId > 0);
+
+            var index = self.joined.insert({ user: user, bet: betAmount, autoCashOut: autoCashOut, playId: playId, status: 'PLAYING' });
+
+            self.emit('player_bet',  {
+                username: user.username,
+                bet: 888, //  deprecated, TODO: remove
+                index: index
+            });
+
+            callback(null);
         }
-
-        assert(playId > 0);
-        self.players[user.username].playId = playId;
-        self.players[user.username].status = 'PLAYING';
-
-        var res = {
-            username: user.username,
-            bet: betAmount
-        };
-        self.emit('player_bet', res);
-        callback(null);
     });
 };
 
@@ -312,7 +321,6 @@ Game.prototype.doCashOut = function(play, at, callback) {
 
     self.emit('cashed_out', {
         username: username,
-        amount: won, // TODO: deprecate
         stopped_at: at
     });
 
@@ -339,10 +347,11 @@ Game.prototype.runCashOuts = function(at) {
             return;
 
         assert(play.status === 'PLAYING');
+        assert(play.autoCashOut);
 
-        if (play.autoCashOut <= at && play.autoCashOut <= self.crashPoint) {
+        if (play.autoCashOut <= at && play.autoCashOut <= self.crashPoint && play.autoCashOut <= self.forcePoint) {
 
-            self.doCashOut(play, Math.min(self.forcePoint, play.autoCashOut || self.crashPoint), function (err) {
+            self.doCashOut(play, play.autoCashOut, function (err) {
                 if (err)
                     console.log('[INTERNAL_ERROR] could not auto cashout ', playerUserName, ' at ', play.autoCashOut);
             });
@@ -367,7 +376,7 @@ Game.prototype.setForcePoint = function() {
            var amount = play.bet * (play.stoppedAt - 100) / 100;
            totalCashedOut += amount;
        } else {
-           assert(play.status == 'PLAYING' || play.status === 'PENDING');
+           assert(play.status == 'PLAYING');
            assert(lib.isInt(play.bet));
            totalBet += play.bet;
        }
@@ -413,14 +422,6 @@ Game.prototype.cashOut = function(user, callback) {
 
     if (play.status === 'CASHED_OUT')
         return callback('ALREADY_CASHED_OUT');
-
-    if (play.status === 'PENDING') {
-        console.log('Trying to cash out pending bet, rescheduling for 50ms...');
-        setTimeout(function() {
-            self.cashOut(user, callback);
-        }, 50);
-        return;
-    }
 
     self.doCashOut(play, at, callback);
     self.setForcePoint();

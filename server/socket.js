@@ -102,7 +102,6 @@ module.exports = function(server,game,chat) {
 
             if (!lib.isInt(amount)) {
                 return sendError(socket, '[place_bet] No place bet amount: ' + amount);
-
             }
             if (amount <= 0 || !lib.isInt(amount / 100)) {
                 return sendError(socket, '[place_bet] Must place a bet in multiples of 100, got: ' + amount);
@@ -220,9 +219,7 @@ module.exports = function(server,game,chat) {
             if (!loggedIn)
                 return sendError(socket, '[set_auto_cash_out] not logged in');
 
-            if (!amount)
-                amount = null;
-            else if (!lib.isInt(amount) || amount <= 100)
+            if (!lib.isInt(amount) || amount < 100)
                 return sendError(socket, '[set_auto_cash_out] amount problem');
 
             game.updateAutoCashOut(loggedIn, amount);
