@@ -26,6 +26,7 @@ function Game(gameHistory) {
 
     self.state = 'ENDED'; // 'STARTING' | 'BLOCKING' | 'IN_PROGRESS' |  'ENDED'
     self.pending = {}; // Set of players pending a joined
+    self.pendingCount = 0;
     self.joined = new SortedArray(); // A list of joins, before the game is in progress
 
     self.players = {}; // An object of userName ->  { playId: ..., autoCashOut: .... }
@@ -74,9 +75,8 @@ function Game(gameHistory) {
 
         loop();
         function loop() {
-            var l = Object.keys(self.pending).length;
-            if (l > 0) {
-                console.log('Delaying game by 100ms for ', l , ' joins');
+            if (self.pendingCount > 0) {
+                console.log('Delaying game by 100ms for ', self.pendingCount , ' joins');
                 return setTimeout(loop, 100);
             }
             startGame();
@@ -86,6 +86,8 @@ function Game(gameHistory) {
     function startGame() {
         self.state = 'IN_PROGRESS';
         self.startTime = new Date();
+        self.pending = {};
+        self.pendingCount = 0;
 
         var bets = {};
         var arr = self.joined.getArray();
@@ -274,10 +276,11 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
         return callback('ALREADY_PLACED_BET');
 
     self.pending[user.username] = user.username;
+    self.pendingCount++;
     console.log('User: ', user.username, ' placing ', betAmount, ' bet in ', self.gameId, ' with auto: ', autoCashOut);
 
     db.placeBet(betAmount, user.id, self.gameId, function(err, playId) {
-        delete self.pending[user.username];
+        self.pendingCount--;
 
         if (err) {
             if (err.code == '23514') // constraint violation (it's withdrawing less than 0)
@@ -292,7 +295,6 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
 
             self.emit('player_bet',  {
                 username: user.username,
-                bet: 888, //  deprecated, TODO: remove
                 index: index
             });
 
