@@ -214,16 +214,6 @@ module.exports = function(server,game,chat) {
             chat.say(socket, loggedIn, message);
         });
 
-
-        socket.on('set_auto_cash_out', function(amount) {
-            if (!loggedIn)
-                return sendError(socket, '[set_auto_cash_out] not logged in');
-
-            if (!lib.isInt(amount) || amount < 100)
-                return sendError(socket, '[set_auto_cash_out] amount problem');
-
-            game.updateAutoCashOut(loggedIn, amount);
-        });
     }
 
     function sendErrorChat(socket, message) {

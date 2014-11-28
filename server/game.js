@@ -158,26 +158,6 @@ function Game(gameHistory) {
 
 util.inherits(Game, events.EventEmitter);
 
-Game.prototype.updateAutoCashOut = function(user, amount) {
-    assert(user.username);
-    assert( Number.isFinite(amount));
-    var self = this;
-
-    if (this.state === 'ENDED')
-        return false;
-
-    var play = lib.getOwnProperty(self.players, user.username);
-
-    if (!play)
-        return false;
-
-    var elapsed = new Date() - self.startTime;
-
-    play.autoCashOut = Math.max(growthFunc(elapsed), amount);
-
-    return true;
-};
-
 Game.prototype.endGame = function() {
     var self = this;
 
@@ -283,7 +263,7 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
         self.pendingCount--;
 
         if (err) {
-            if (err.code == '23514') // constraint violation (it's withdrawing less than 0)
+            if (err.code == '23514') // constraint violation
                 return callback('NOT_ENOUGH_MONEY');
 
             console.log('[INTERNAL_ERROR] could not play game, got error: ', err);
