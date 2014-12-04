@@ -271,8 +271,9 @@ exports.getUserByRecoverId = function(recoverId, callback) {
 };
 
 
-exports.placeBet = function(amount, userId, gameId, callback) {
+exports.placeBet = function(amount, autoCashOut, userId, gameId, callback) {
     assert(typeof amount === 'number');
+    assert(typeof autoCashOut === 'number');
     assert(typeof userId === 'number');
     assert(typeof gameId === 'number');
     assert(typeof callback === 'function');
@@ -284,8 +285,8 @@ exports.placeBet = function(amount, userId, gameId, callback) {
                     return callback(err);
 
                 client.query(
-                    'INSERT INTO plays(user_id, game_id, bet) VALUES($1, $2, $3) RETURNING id',
-                    [userId, gameId, amount], function(err, result) {
+                    'INSERT INTO plays(user_id, game_id, bet, auto_cash_out) VALUES($1, $2, $3, $4) RETURNING id',
+                    [userId, gameId, amount, autoCashOut], function(err, result) {
                         if (err)
                             return callback(err);
 

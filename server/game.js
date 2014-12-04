@@ -257,9 +257,8 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
 
     self.pending[user.username] = user.username;
     self.pendingCount++;
-    console.log('User: ', user.username, ' placing ', betAmount, ' bet in ', self.gameId, ' with auto: ', autoCashOut);
 
-    db.placeBet(betAmount, user.id, self.gameId, function(err, playId) {
+    db.placeBet(betAmount, autoCashOut, user.id, self.gameId, function(err, playId) {
         self.pendingCount--;
 
         if (err) {
