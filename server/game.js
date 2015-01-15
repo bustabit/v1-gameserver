@@ -13,11 +13,10 @@ var tickRate = 150; // ping the client every X miliseconds
 var afterCrashTime = 3000; // how long from game_crash -> game_starting
 var restartTime = 5000; // How long from  game_starting -> game_started
 
-function Game(gameHistory) {
+function Game(lastGameId, lastHash, gameHistory) {
     var self = this;
 
     self.gameShuttingDown = false;
-    self.seed = null;
     self.startTime; // time game started. If before game started, is an estimate...
     self.crashPoint; // when the game crashes, 0 means instant crash
     self.gameDuration; // how long till the game will crash..
@@ -30,8 +29,11 @@ function Game(gameHistory) {
     self.joined = new SortedArray(); // A list of joins, before the game is in progress
 
     self.players = {}; // An object of userName ->  { playId: ..., autoCashOut: .... }
-    self.gameId = null;
+    self.gameId = lastGameId;
     self.gameHistory = gameHistory;
+
+    self.lastHash = lastHash;
+    self.hash = null;
 
     events.EventEmitter.call(self);
 
@@ -42,10 +44,8 @@ function Game(gameHistory) {
             return;
         }
 
-        var crashPoint = genGameCrash();
-        var seed = lib.randomHex(16);
 
-        db.createGame(crashPoint, seed, function (err, gameId) {
+        db.createGame(self.gameId + 1, function (err, info) {
             if (err) {
                 console.log('Could not create game', err, ' retrying in 2 sec..');
                 setTimeout(runGame, 2000);
@@ -53,16 +53,15 @@ function Game(gameHistory) {
             }
 
             self.state = 'STARTING';
-            self.seed = seed;
-            self.crashPoint = crashPoint;
-            self.gameId = gameId;
+            self.crashPoint = info.crashPoint;
+            self.hash = info.hash;
+            self.gameId++;
             self.startTime = new Date(Date.now() + restartTime);
             self.players = {}; // An object of userName ->  { user: ..., playId: ..., autoCashOut: ...., status: ... }
             self.gameDuration = Math.ceil(inverseGrowth(self.crashPoint + 1)); // how long till the game will crash..
 
             self.emit('game_starting', {
-                game_id: gameId,
-                hash: lib.sha(self.crashPoint + '|' + self.seed),
+                game_id: self.gameId,
                 time_till_start: restartTime
             });
 
@@ -176,13 +175,15 @@ Game.prototype.endGame = function() {
         playerInfo[entry.user.username].bonus = entry.amount;
     });
 
+    self.lastHash = self.hash;
+
 
     // oh noes, we crashed!
     self.emit('game_crash', {
         elapsed: self.gameDuration,
         game_crash: self.crashPoint, // We send 0 to client in instant crash
         bonuses: bonusJson,
-        seed: self.seed
+        hash: self.lastHash
     });
 
     self.gameHistory.addCompletedGame({
@@ -224,8 +225,8 @@ Game.prototype.getInfo = function() {
     var res = {
         state: this.state,
         player_info: playerInfo,
-        game_id: this.gameId, // null between game crash, and game starting..
-        hash: lib.sha(this.crashPoint + '|' + this.seed),
+        game_id: this.gameId, // game_id of current game, if game hasnt' started its the last game
+        last_hash: this.lastHash,
         // if the game is pending, elapsed is how long till it starts
         // if the game is running, elapsed is how long its running for
         /// if the game is ended, elapsed is how long since the game started
@@ -559,31 +560,6 @@ function growthFunc(ms) {
 function inverseGrowth(result) {
     var c = 16666.666667;
     return c * Math.log(0.01 * result);
-}
-
-// calculate game crash in %
-//   e.g. 150 = 1.50x crash
-function genGameCrash() {
-    if (process.env.CRASH_AT) { // Set env variable to simulate a crash at...
-        if (process.env.NODE_ENV == 'production') throw new Error('wtf? manual crashing on prod?');
-        var at = parseInt(process.env.CRASH_AT);
-        if (!lib.isInt(at) || (at < 100 && at != 0))
-            throw new Error('If using CRASH_AT it must be an integer >= 100 (or 0 for instant crash)');
-        return at;
-    }
-
-    var ic = cryptoRand.randInt(0, 100); // 1 in 101 chance
-    if (ic === 0)
-        return 0; // instant crash;
-
-    var r = cryptoRand.rand();
-    var perfect = (1 / (1 - r));
-
-    var houseEdge = (perfect-1) * 0.01;
-
-    var multiplier = perfect - houseEdge;
-
-    return Math.floor(multiplier * 100);
 }
 
 module.exports = Game;

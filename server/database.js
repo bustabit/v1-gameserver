@@ -48,16 +48,6 @@ function query(query, params, callback) {
     }
 }
 
-exports.query = query;
-
-
-// runner takes (client, callback)
-
-// callback should be called with (err, data)
-// client should not be used to commit, rollback or start a new transaction
-
-// callback takes (err, data)
-
 function getClient(runner, callback) {
     doIt();
 
@@ -95,11 +85,44 @@ function getClient(runner, callback) {
             });
         });
     }
-
-
 }
 
 
+exports.query = query;
+
+// runner takes (client, callback)
+
+// callback should be called with (err, data)
+// client should not be used to commit, rollback or start a new transaction
+
+// callback takes (err, data)
+
+exports.getLastGameInfo = function(callback) {
+    query('SELECT MAX(id) id FROM games', function(err, results) {
+        if (err) return callback(err);
+        assert(results.rows.length === 1);
+
+        var id = results.rows[0].id;
+
+        if (!id || id < 1e6) {
+            return callback(null, {
+                id: 1e6 - 1,
+                hash: 'c1cfa8e28fc38999eaa888487e443bad50a65e0b710f649affa6718cfbfada4d'
+            });
+        }
+
+        query('SELECT hash FROM game_hashes WHERE game_id = $1', [id], function(err, results) {
+            if (err) return callback(err);
+
+            assert(results.rows.length === 1);
+
+            callback(null, {
+                id: id,
+                hash: results.rows[0].hash
+            });
+        });
+    });
+};
 
 exports.getUserByName = function(username, callback) {
     assert(username);
@@ -577,22 +600,33 @@ exports.getUserChartData = function(userId, callback) {
     });
 };
 
-// callback called with (err, gameId)
-exports.createGame = function(gameCrash, seed, callback) {
-    assert(typeof gameCrash === 'number');
-    assert(typeof gameCrash === 'number');
+// callback called with (err, { crashPoint: , hash: })
+exports.createGame = function(gameId, callback) {
+    assert(typeof gameId === 'number');
     assert(typeof callback === 'function');
 
-    query('INSERT INTO games(game_crash, seed) VALUES($1, $2) RETURNING id',
-        [gameCrash, seed],
-        function(err, result) {
+    query('SELECT hash FROM game_hashes WHERE game_id = $1', [gameId], function(err, results) {
         if (err) return callback(err);
 
-        var id = result.rows[0].id;
-        assert(typeof id == 'number');
+        if (results.rows.length !==  1) {
+            console.error('[INTERNAL_ERROR] Could not find hash for game ', gameId);
+            return callback('NO_GAME_HASH');
+        }
 
-        return callback(null, id);
+        var hash = results.rows[0].hash;
+        var gameCrash = lib.crashPointFromHash(hash);
+        assert(lib.isInt(gameCrash));
+
+        query('INSERT INTO games(id, game_crash) VALUES($1, $2)',
+            [gameId, gameCrash], function(err) {
+                if (err) return callback(err);
+
+                return callback(null, { crashPoint: gameCrash, hash: hash } );
+            });
     });
+
+
+
 };
 
 

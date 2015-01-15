@@ -1,3 +1,5 @@
+var async = require('async');
+var assert = require('assert');
 var constants = require('constants');
 var fs = require('fs');
 var path = require('path');
@@ -35,16 +37,27 @@ if (process.env.USE_HTTPS) {
     });
 }
 
-database.getGameHistory(function(err,rows) {
+async.parallel([
+    database.getGameHistory,
+    database.getLastGameInfo
+], function(err, results) {
     if (err) {
         console.error('[INTERNAL_ERROR] got error: ', err,
             'Unable to get table history');
         throw err;
     }
 
-    var gameHistory = new GameHistory(rows);
-    var game = new Game(gameHistory);
+    var gameHistory = new GameHistory(results[0]);
+    var info = results[1];
+    var lastGameId = info.id;
+    var lastHash = info.hash;
+    assert(typeof lastGameId === 'number');
+
+    var game = new Game(lastGameId, lastHash, gameHistory);
     var chat = new Chat();
 
     socket(server, game, chat);
+
+
+
 });
