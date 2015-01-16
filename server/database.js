@@ -631,17 +631,20 @@ exports.createGame = function(gameId, callback) {
 
 
 exports.getGameHistory = function(callback) {
-    query('SELECT games.id game_id, games.game_crash, games.created, json_agg(pv) plays ' +
+
+    query('SELECT games.id game_id, games.game_crash, games.created, (array_agg(game_hashes.hash))[1] AS hash, ' +
+    ' json_agg(pv) plays ' +
         'FROM games ' +
         'LEFT JOIN (SELECT users.username, plays.bet, plays.cash_out, plays.bonus, plays.game_id ' +
         '  FROM plays, users ' +
         '  WHERE plays.user_id = users.id) pv ON pv.game_id = games.id ' +
+        'LEFT JOIN game_hashes ON games.id = game_hashes.game_id ' +
         'WHERE games.ended = true ' +
         'GROUP BY 1 ' +
         'ORDER BY games.id DESC LIMIT 10;', function(err, data) {
-            if (err) return err;
+            if (err) throw err;
 
-            data.rows.forEach(function(row) {
+        data.rows.forEach(function(row) {
                 row.player_info = {};
 
                 row.plays.forEach(function(play) {

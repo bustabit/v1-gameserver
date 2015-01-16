@@ -190,7 +190,8 @@ Game.prototype.endGame = function() {
         game_id: gameId,
         game_crash: self.crashPoint,
         created: self.startTime,
-        player_info: playerInfo
+        player_info: playerInfo,
+        hash: self.lastHash
     });
 
     db.endGame(gameId, bonuses, function(err) {

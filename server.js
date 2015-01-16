@@ -58,6 +58,4 @@ async.parallel([
 
     socket(server, game, chat);
 
-
-
 });
