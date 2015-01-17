@@ -141,7 +141,7 @@ function divisible(hash, mod) {
 }
 
 // This will be the client seed of block 339300
-var clientSeed = 'thisisanexample';
+var clientSeed = '000000000000000007a9a31ff7f07463d91af6b5454241d5faf282e5e0fe1b3a';
 
 exports.crashPointFromHash = function(serverSeed) {
     var hash = crypto.createHmac('sha256', serverSeed).update(clientSeed).digest('hex');
