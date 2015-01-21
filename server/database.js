@@ -635,7 +635,7 @@ exports.getBankroll = function(callback) {
             '(SELECT COALESCE(SUM(amount),0) FROM fundings) - ' +
             '(SELECT COALESCE(SUM(balance_satoshis), 0) FROM users)) AS profit ',
         function(err, results) {
-            if (err) return callback(results);
+            if (err) return callback(err);
 
             assert(results.rows.length === 1);
 
