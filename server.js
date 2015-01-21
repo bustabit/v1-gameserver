@@ -39,7 +39,8 @@ if (process.env.USE_HTTPS) {
 
 async.parallel([
     database.getGameHistory,
-    database.getLastGameInfo
+    database.getLastGameInfo,
+    database.getBankroll
 ], function(err, results) {
     if (err) {
         console.error('[INTERNAL_ERROR] got error: ', err,
@@ -49,11 +50,15 @@ async.parallel([
 
     var gameHistory = new GameHistory(results[0]);
     var info = results[1];
+    var bankroll = results[2];
+
+    console.log('Have a bankroll of: ', bankroll/1e8, ' btc');
+
     var lastGameId = info.id;
     var lastHash = info.hash;
     assert(typeof lastGameId === 'number');
 
-    var game = new Game(lastGameId, lastHash, gameHistory);
+    var game = new Game(lastGameId, lastHash, bankroll, gameHistory);
     var chat = new Chat();
 
     socket(server, game, chat);

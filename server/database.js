@@ -16,6 +16,10 @@ pg.types.setTypeParser(20, function(val) { // parse int8 as an integer
     return val === null ? null : parseInt(val);
 });
 
+pg.types.setTypeParser(1700, function(val) { // parse numeric as a float
+    return val === null ? null : parseFloat(val);
+});
+
 // callback is called with (err, client, done)
 function connect(callback) {
     return pg.connect(databaseUrl, callback);
@@ -624,11 +628,28 @@ exports.createGame = function(gameId, callback) {
                 return callback(null, { crashPoint: gameCrash, hash: hash } );
             });
     });
-
-
-
 };
 
+exports.getBankroll = function(callback) {
+    query('SELECT (' +
+            '(SELECT COALESCE(SUM(amount),0) FROM fundings) - ' +
+            '(SELECT COALESCE(SUM(balance_satoshis), 0) FROM users)) AS profit ',
+        function(err, results) {
+            if (err) return callback(results);
+
+            assert(results.rows.length === 1);
+
+            var profit = results.rows[0].profit;
+            assert(typeof profit === 'number');
+
+            var offset = 50e8; // 50 BTC
+            var min = 1e8;
+
+            callback(null, Math.max(min, profit+offset));
+        }
+    );
+
+};
 
 exports.getGameHistory = function(callback) {
 

@@ -3,18 +3,19 @@ var async = require('async');
 var db = require('./database');
 var events = require('events');
 var util = require('util');
-var cryptoRand = require('crypto-rand');
 var _ = require('lodash');
 var lib = require('./lib');
 var SortedArray = require('./sorted_array');
 
-var maxWin = process.env.MAX_LOSS ? parseInt(process.env.MAX_LOSS) : 2e8; // The max loss in a single game, in satoshis
 var tickRate = 150; // ping the client every X miliseconds
 var afterCrashTime = 3000; // how long from game_crash -> game_starting
 var restartTime = 5000; // How long from  game_starting -> game_started
 
-function Game(lastGameId, lastHash, gameHistory) {
+function Game(lastGameId, lastHash, bankroll, gameHistory) {
     var self = this;
+
+    self.bankroll = bankroll;
+    self.maxWin;
 
     self.gameShuttingDown = false;
     self.startTime; // time game started. If before game started, is an estimate...
@@ -59,9 +60,11 @@ function Game(lastGameId, lastHash, gameHistory) {
             self.startTime = new Date(Date.now() + restartTime);
             self.players = {}; // An object of userName ->  { user: ..., playId: ..., autoCashOut: ...., status: ... }
             self.gameDuration = Math.ceil(inverseGrowth(self.crashPoint + 1)); // how long till the game will crash..
+            self.maxWin = self.bankroll * 0.03; // Risk 3% per game
 
             self.emit('game_starting', {
                 game_id: self.gameId,
+                max_win: self.maxWin,
                 time_till_start: restartTime
             });
 
@@ -124,7 +127,7 @@ function Game(lastGameId, lastHash, gameHistory) {
             self.cashOutAll(self.forcePoint, function (err) {
                 console.log('Just forced cashed out everyone at: ', self.forcePoint, ' got err: ', err);
 
-                crashGame();
+                crashGame(true);
             });
             return;
         }
@@ -132,14 +135,14 @@ function Game(lastGameId, lastHash, gameHistory) {
         // and run the next
 
         if (at > self.crashPoint)
-            crashGame();
+            crashGame(false);
         else
             tick(elapsed);
     }
 
-    function crashGame() {
+    function crashGame(forced) {
         // oh noes, we crashed!
-        self.endGame();
+        self.endGame(forced);
 
         if (self.gameShuttingDown)
             return self.emit('shutdown');
@@ -157,16 +160,32 @@ function Game(lastGameId, lastHash, gameHistory) {
 
 util.inherits(Game, events.EventEmitter);
 
-Game.prototype.endGame = function() {
+Game.prototype.endGame = function(forced) {
     var self = this;
 
     var gameId = self.gameId;
 
     assert(self.crashPoint == 0 || self.crashPoint >= 100);
 
-    // instant crash don't get bonuses..
-    var bonuses = (self.crashPoint === 0) ? [] : calcBonuses(self.players);
+    var bonuses = [];
 
+    if (self.crashPoint !== 0) {
+        bonuses = calcBonuses(self.players);
+
+        var givenOut = 0;
+        Object.keys(self.players).forEach(function(player) {
+            var record = self.players[player];
+
+            givenOut += record.bet * 0.01;
+            if (record.status === 'CASHED_OUT') {
+                var given = (record.stoppedAt/100) * record.bet;
+                assert(typeof given === 'number' && given > 0);
+                givenOut += given;
+            }
+        });
+
+        self.bankroll -= givenOut;
+    }
 
     var playerInfo = self.getInfo().player_info;
     var bonusJson = {};
@@ -177,9 +196,9 @@ Game.prototype.endGame = function() {
 
     self.lastHash = self.hash;
 
-
     // oh noes, we crashed!
     self.emit('game_crash', {
+        forced: forced,
         elapsed: self.gameDuration,
         game_crash: self.crashPoint, // We send 0 to client in instant crash
         bonuses: bonusJson,
@@ -228,6 +247,7 @@ Game.prototype.getInfo = function() {
         player_info: playerInfo,
         game_id: this.gameId, // game_id of current game, if game hasnt' started its the last game
         last_hash: this.lastHash,
+        max_win: this.maxWin,
         // if the game is pending, elapsed is how long till it starts
         // if the game is running, elapsed is how long its running for
         /// if the game is ended, elapsed is how long since the game started
@@ -271,6 +291,8 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
             callback(err);
         } else {
             assert(playId > 0);
+
+            self.bankroll += betAmount;
 
             var index = self.joined.insert({ user: user, bet: betAmount, autoCashOut: autoCashOut, playId: playId, status: 'PLAYING' });
 
@@ -368,7 +390,7 @@ Game.prototype.setForcePoint = function() {
    if (totalBet === 0) {
        self.forcePoint = Infinity; // the game can go until it crashes, there's no end.
    } else {
-       var left = maxWin - totalCashedOut;
+       var left = self.maxWin - totalCashedOut - (totalBet * 0.01);
 
        var ratio =  (left+totalBet) / totalBet;
 
