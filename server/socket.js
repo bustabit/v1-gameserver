@@ -94,6 +94,9 @@ module.exports = function(server,game,chat) {
                 game.cashOut(loggedIn, function(err) {
                     if (err && typeof err !== 'string')
                         console.log('Error: auto cashing out got: ', err);
+
+                    if (!err)
+                        console.log('Disconnect cashed out ', loggedIn.username, ' in game ', game.gameId);
                 });
         });
 
