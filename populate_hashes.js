@@ -5,7 +5,8 @@ var _ = require('lodash');
 
 var offset = 1e6;
 
-var game = 1e6; // You might want to make this 10M for a prod setting..
+var games = 1e6;  // You might want to make this 10M for a prod setting..
+var game = games;
 var serverSeed = 'DO NOT USE THIS SEED';
 
 function loop(cb) {
@@ -24,10 +25,20 @@ function loop(cb) {
     async.parallel(inserts, function(err) {
         if (err) throw err;
 
+        // Clear the current line and move to the beginning.
+        var pct = 100 * (games - game) / games;
+        process.stdout.clearLine();
+        process.stdout.cursorTo(0);
+        process.stdout.write(
+            "Processed: " + (games - game) + ' / ' + games +
+                ' (' + pct.toFixed(2)  + '%)');
+
         if (game > 0)
             loop(cb);
-        else
+        else {
+            console.log(' Done');
             cb();
+        }
     });
 }
 
