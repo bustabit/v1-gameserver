@@ -53,8 +53,16 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
                 return;
             }
 
+
+
             self.state = 'STARTING';
             self.crashPoint = info.crashPoint;
+
+            if (process.env.CRASH_AT) {
+                assert(process.env.NODE_ENV  !== 'production');
+                self.crashPoint = parseInt(process.env.CRASH_AT);
+            }
+
             self.hash = info.hash;
             self.gameId++;
             self.startTime = new Date(Date.now() + restartTime);
