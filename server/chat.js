@@ -7,10 +7,15 @@ var _        =  require('lodash');
 var db       =  require('./database');
 var lib      =  require('./lib');
 
+var CHAT_HISTORY_SIZE = 50;
+
 function Chat() {
     var self = this;
 
-    self.chatTable = new CBuffer(40);
+    // History of chat messages.
+    self.chatTable = new CBuffer(CHAT_HISTORY_SIZE);
+    // History of mod only messages.
+    self.modTable  = new CBuffer(CHAT_HISTORY_SIZE);
 
     /*
       Collection of muted users.
@@ -29,8 +34,15 @@ function Chat() {
 
 util.inherits(Chat, events.EventEmitter);
 
-Chat.prototype.getHistory = function () {
-    return this.chatTable.toArray();
+Chat.prototype.getHistory = function (userInfo) {
+    var history = this.chatTable.toArray();
+
+    if (userInfo && userInfo.moderator) {
+        history = history.concat(this.modTable.toArray());
+        history = _.sortBy(history, 'time');
+    }
+
+    return history.splice(0, CHAT_HISTORY_SIZE);
 };
 
 Chat.prototype.say = function(socket, userInfo, message) {
@@ -70,7 +82,7 @@ Chat.prototype.say = function(socket, userInfo, message) {
 
     self.chatTable.push(msg);
     self.emit('msg', msg);
-}
+};
 
 Chat.prototype.mute = function(shadow, moderatorInfo, username, time, callback) {
     var self = this;
@@ -110,32 +122,47 @@ Chat.prototype.mute = function(shadow, moderatorInfo, username, time, callback) 
             shadow:      shadow
         };
 
-        self.emit('msg', msg);
+        if (shadow) {
+            self.modTable.push(msg);
+            self.emit('modmsg', msg);
+        } else {
+            self.chatTable.push(msg);
+            self.emit('msg', msg);
+        }
         callback(null);
     });
-}
+};
 
-Chat.prototype.unmute = function(moderatorInfo, username) {
+Chat.prototype.unmute = function(moderatorInfo, username, callback) {
     var self = this;
     var now = new Date();
 
     if (!lib.hasOwnProperty(self.muted, username))
-        return 'USER_NOT_MUTED';
+        return callback('USER_NOT_MUTED');
 
+    var shadow = self.muted[username].shadow;
     delete self.muted[username];
 
     var msg = {
         time:      now,
         type:      'unmute',
         moderator: moderatorInfo.username,
-        username:  username
+        username:  username,
+        shadow:    shadow
     };
 
-    self.emit('msg', msg);
-}
+    if (shadow) {
+        self.modTable.push(msg);
+        self.emit('modmsg', msg);
+    } else {
+        self.chatTable.push(msg);
+        self.emit('msg', msg);
+    }
+    callback(null);
+};
 
 Chat.prototype.listmuted = function () {
-    return self.muted
-}
+    return self.muted;
+};
 
 module.exports = Chat;

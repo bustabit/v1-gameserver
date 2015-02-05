@@ -22,11 +22,8 @@ module.exports = function(server,game,chat) {
     })();
 
     // Forward chat messages to clients.
-    chat.on('msg', function (msg) {
-        var group = msg.type == 'mute' && msg.shadow
-            ? 'moderators' : 'joined';
-        io.to(group).emit('msg', msg);
-    });
+    chat.on('msg', function (msg) { io.to('joined').emit('msg', msg); });
+    chat.on('modmsg', function (msg) { io.to('moderators').emit('msg', msg); });
 
     io.on('connection', onConnection);
 
@@ -57,18 +54,19 @@ module.exports = function(server,game,chat) {
             }
 
             function cont(loggedIn) {
-                var res = game.getInfo();
-                res['chat'] = chat.getHistory();
-                res['table_history'] = game.gameHistory.getHistory();
-                res['username'] = loggedIn ? loggedIn.username : null;
-                res['balance_satoshis'] = loggedIn ? loggedIn.balance_satoshis : null;
-                ack(null, res);
-
                 if (loggedIn) {
                     loggedIn.admin     = loggedIn.userclass === 'admin';
                     loggedIn.moderator = loggedIn.userclass === 'admin' ||
                         loggedIn.userclass === 'moderator';
                 }
+
+                var res = game.getInfo();
+                res['chat'] = chat.getHistory(loggedIn);
+                res['table_history'] = game.gameHistory.getHistory();
+                res['username'] = loggedIn ? loggedIn.username : null;
+                res['balance_satoshis'] = loggedIn ? loggedIn.balance_satoshis : null;
+                ack(null, res);
+
                 joined(socket, loggedIn);
             }
         });
@@ -201,6 +199,22 @@ module.exports = function(server,game,chat) {
                                   });
                     } else {
                         return sendErrorChat(socket, 'Not a moderator.');
+                    }
+                    break;
+                case 'unmute':
+                    if (loggedIn.moderator) {
+                        var unmuteReg = /^\s*([a-zA-Z0-9_\-]+)\s*$/;
+                        var unmuteMatch = rest.match(unmuteReg);
+
+                        if (!unmuteMatch)
+                            return sendErrorChat(socket, 'Usage: /unmute <user>');
+
+                        var username = unmuteMatch[1];
+                        chat.unmute(
+                            loggedIn, username,
+                            function (err) {
+                                if (err) return sendErrorChat(socket, err);
+                            });
                     }
                     break;
                 default:
