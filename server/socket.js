@@ -201,6 +201,22 @@ module.exports = function(server,game,chat) {
                         return sendErrorChat(socket, 'Not a moderator.');
                     }
                     break;
+                case 'unmute':
+                    if (loggedIn.moderator) {
+                        var unmuteReg = /^\s*([a-zA-Z0-9_\-]+)\s*$/;
+                        var unmuteMatch = rest.match(unmuteReg);
+
+                        if (!unmuteMatch)
+                            return sendErrorChat(socket, 'Usage: /unmute <user>');
+
+                        var username = unmuteMatch[1];
+                        chat.unmute(
+                            loggedIn, username,
+                            function (err) {
+                                if (err) return sendErrorChat(socket, err);
+                            });
+                    }
+                    break;
                 default:
                     socket.emit('msg', {
                         time: new Date(),
