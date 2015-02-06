@@ -68,7 +68,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             self.startTime = new Date(Date.now() + restartTime);
             self.players = {}; // An object of userName ->  { user: ..., playId: ..., autoCashOut: ...., status: ... }
             self.gameDuration = Math.ceil(inverseGrowth(self.crashPoint + 1)); // how long till the game will crash..
-            self.maxWin = self.bankroll * 0.03; // Risk 3% per game
+            self.maxWin = Math.round(self.bankroll * 0.03); // Risk 3% per game
 
             self.emit('game_starting', {
                 game_id: self.gameId,
