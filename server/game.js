@@ -131,7 +131,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 
         self.runCashOuts(at);
 
-        if (self.forcePoint <= at && self.forcePoint < self.crashPoint) {
+        if (self.forcePoint <= at && self.forcePoint <= self.crashPoint) {
             self.cashOutAll(self.forcePoint, function (err) {
                 console.log('Just forced cashed out everyone at: ', self.forcePoint, ' got err: ', err);
 
