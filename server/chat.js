@@ -40,9 +40,13 @@ Chat.prototype.getHistory = function (userInfo) {
     if (userInfo && userInfo.moderator) {
         history = history.concat(this.modTable.toArray());
         history = _.sortBy(history, 'time');
+
+        // Sorting by time leaves younger messages at the end. So use
+        // the last CHAT_HISTORY_SIZE messages.
+        history = history.splice(-CHAT_HISTORY_SIZE);
     }
 
-    return history.splice(0, CHAT_HISTORY_SIZE);
+    return history;
 };
 
 Chat.prototype.say = function(socket, userInfo, message) {
