@@ -642,10 +642,9 @@ exports.getBankroll = function(callback) {
             var profit = results.rows[0].profit;
             assert(typeof profit === 'number');
 
-            var offset = 50e8; // 50 BTC
             var min = 1e8;
 
-            callback(null, Math.max(min, profit+offset));
+            callback(null, Math.max(min, profit));
         }
     );
 
