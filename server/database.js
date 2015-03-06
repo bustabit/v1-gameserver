@@ -360,7 +360,7 @@ exports.endGame = function(gameId, bonuses, callback) {
             );
         });
 
-        async.parallelLimit(tasks, 5, function(err) {
+        async.parallel(tasks, function(err) {
            if (err) {
                error = true;
                return callback(err);
