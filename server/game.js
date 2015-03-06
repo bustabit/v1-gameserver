@@ -39,6 +39,11 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     events.EventEmitter.call(self);
 
     function runGame() {
+        if (self.dbEnding) {
+           console.log('Last game is still ending... Wait 100ms');
+           setTimeout(runGame, 100);
+           return;
+        }
 
         if (self.gameShuttingDown) {
             console.log('Not creating next game, server shutting down..');
@@ -221,9 +226,12 @@ Game.prototype.endGame = function(forced) {
         hash: self.lastHash
     });
 
+    self.dbEnding = true;
     db.endGame(gameId, bonuses, function(err) {
-        if (err)
-            console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+      if (err)
+         console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+
+       self.dbEnding = false;
     });
 
     self.state = 'ENDED';
