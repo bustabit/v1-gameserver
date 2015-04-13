@@ -12,11 +12,11 @@
     "debug": "~1.0.4",
     "lodash": "~2.4.1",
     "pg": "~3.3.0",
-    "requirejs": "~2.1.15",
     "socket.io": "~1.2.0",
     "uuid": "^2.0.1"
   },
   "scripts": {
+    "start-dev": "env $(cat .env | xargs) nodemon server.js --use_strict",
     "start": "node server.js --use_strict"
   }
 }

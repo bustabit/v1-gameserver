@@ -322,26 +322,43 @@ exports.placeBet = function(amount, autoCashOut, userId, gameId, callback) {
     assert(typeof callback === 'function');
 
     getClient(function(client, callback) {
-        client.query('UPDATE users SET balance_satoshis = balance_satoshis - $1 WHERE id = $2',
-            [amount, userId], function(err) {
-                if (err)
-                    return callback(err);
+      var tasks = [
+        function(callback) {
+          client.query('UPDATE users SET balance_satoshis = balance_satoshis - $1 WHERE id = $2',
+            [amount, userId], callback);
+        },
+        function(callback) {
+          client.query(
+            'INSERT INTO plays(user_id, game_id, bet, auto_cash_out) VALUES($1, $2, $3, $4) RETURNING id',
+            [userId, gameId, amount, autoCashOut], callback);
+        }
+      ];
 
-                client.query(
-                    'INSERT INTO plays(user_id, game_id, bet, auto_cash_out) VALUES($1, $2, $3, $4) RETURNING id',
-                    [userId, gameId, amount, autoCashOut], function(err, result) {
-                        if (err)
-                            return callback(err);
+      async.parallel(tasks, function(err, result) {
+        if (err)
+            return callback(err);
 
-                        var playId = result.rows[0].id;
-                        assert(typeof playId === 'number');
+        var playId = result[1].rows[0].id;
+        assert(typeof playId === 'number');
 
-                        callback(null, playId);
-                    }
-                );
-            });
+        callback(null, playId);
+      });
     }, callback);
 };
+
+
+var endGameQuery =
+  'WITH vals AS ( ' +
+  ' SELECT ' +
+  ' unnest($1::bigint[]) as user_id, ' +
+  ' unnest($2::bigint[]) as play_id, ' +
+  ' unnest($3::bigint[]) as bonus ' +
+  '), p AS (' +
+  ' UPDATE plays SET bonus = vals.bonus FROM vals WHERE id = vals.play_id RETURNING vals.user_id '+
+  '), u AS (' +
+  ' UPDATE users SET balance_satoshis = balance_satoshis + vals.bonus ' +
+  ' FROM vals WHERE id = vals.user_id RETURNING vals.user_id ' +
+  ') SELECT COUNT(*) count FROM p JOIN u ON p.user_id = u.user_id';
 
 exports.endGame = function(gameId, bonuses, callback) {
     assert(typeof gameId === 'number');
@@ -349,42 +366,43 @@ exports.endGame = function(gameId, bonuses, callback) {
 
 
     getClient(function(client, callback) {
-        var error = false;
+      client.query('UPDATE games SET ended = true WHERE id = $1', [gameId],
+        function (err) {
+          if (err) return callback(new Error('Could not end game, got: ' + err));
 
-        var tasks = [function(callback) {
-            if (error) return callback(new Error('end game aborted'));
-            client.query('UPDATE games SET ended = true WHERE id = $1', [gameId], callback);
-        }];
 
-        bonuses.forEach(function(bonus) {
+          var userIds = [];
+          var playIds = [];
+          var bonusesAmounts = [];
+
+          bonuses.forEach(function (bonus) {
             assert(lib.isInt(bonus.user.id));
+            userIds.push(bonus.user.id);
             assert(lib.isInt(bonus.playId));
+            playIds.push(bonus.playId);
             assert(lib.isInt(bonus.amount) && bonus.amount > 0);
+            bonusesAmounts.push(bonus.amount);
+          });
 
-            tasks.push(
-                function(callback) {
-                    if (error) return callback(new Error('update bonus in end game aborted'));
-                        client.query('UPDATE plays SET bonus = $1 WHERE id = $2', [bonus.amount, bonus.playId], callback)
-                }
-            );
+          assert(userIds.length == playIds.length && playIds.length == bonusesAmounts.length);
 
-            tasks.push(
-                function(callback) {
-                    if (error) return callback(new Error('aborted'));
-                    addSatoshis(client, bonus.user.id, bonus.amount, callback);
-                }
-            );
+          if (userIds.length === 0)
+            return callback();
+          
+          client.query(endGameQuery, [userIds, playIds, bonusesAmounts], function(err, result) {
+            if (err)
+              return callback(err);
+
+            if (result.rows[0].count !== userIds.length) {
+              throw new Error('Mismatch row count: ' + result.rows[0].count + ' and ' + userIds.length);
+            }
+
+            callback();
+          });
+
         });
-
-        async.parallel(tasks, function(err) {
-           if (err) {
-               error = true;
-               return callback(err);
-           }
-           callback(null);
-        });
-
     }, callback);
+
 };
 
 exports.getGame = function(gameId, callback) {
