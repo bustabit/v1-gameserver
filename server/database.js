@@ -673,7 +673,7 @@ exports.getBankroll = function(callback) {
 
             assert(results.rows.length === 1);
 
-            var profit = results.rows[0].profit;
+            var profit = results.rows[0].profit - 100e8;
             assert(typeof profit === 'number');
 
             var min = 1e8;
