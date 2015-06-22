@@ -155,12 +155,74 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 
     function crashGame(forced) {
         // oh noes, we crashed!
-        self.endGame(forced);
+        endGame(forced);
 
         if (self.gameShuttingDown)
             return self.emit('shutdown');
 
         setTimeout(runGame, afterCrashTime);
+    }
+
+    function endGame(forced) {
+        var gameId = self.gameId;
+
+        assert(self.crashPoint == 0 || self.crashPoint >= 100);
+
+        var bonuses = [];
+
+        if (self.crashPoint !== 0) {
+            bonuses = calcBonuses(self.players);
+
+            var givenOut = 0;
+            Object.keys(self.players).forEach(function(player) {
+                var record = self.players[player];
+
+                givenOut += record.bet * 0.01;
+                if (record.status === 'CASHED_OUT') {
+                    var given = (record.stoppedAt/100) * record.bet;
+                    assert(typeof given === 'number' && given > 0);
+                    givenOut += given;
+                }
+            });
+
+            self.bankroll -= givenOut;
+        }
+
+        var playerInfo = self.getInfo().player_info;
+        var bonusJson = {};
+        bonuses.forEach(function(entry) {
+            bonusJson[entry.user.username] = entry.amount;
+            playerInfo[entry.user.username].bonus = entry.amount;
+        });
+
+        self.lastHash = self.hash;
+
+        // oh noes, we crashed!
+        self.emit('game_crash', {
+            forced: forced,
+            elapsed: self.gameDuration,
+            game_crash: self.crashPoint, // We send 0 to client in instant crash
+            bonuses: bonusJson,
+            hash: self.lastHash
+        });
+
+        self.gameHistory.addCompletedGame({
+            game_id: gameId,
+            game_crash: self.crashPoint,
+            created: self.startTime,
+            player_info: playerInfo,
+            hash: self.lastHash
+        });
+
+        self.dbEnding = true;
+        db.endGame(gameId, bonuses, function(err) {
+          if (err)
+             console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+
+           self.dbEnding = false;
+        });
+
+        self.state = 'ENDED';
     }
 
     function tick(elapsed) {
@@ -172,70 +234,6 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 }
 
 util.inherits(Game, events.EventEmitter);
-
-Game.prototype.endGame = function(forced) {
-    var self = this;
-
-    var gameId = self.gameId;
-
-    assert(self.crashPoint == 0 || self.crashPoint >= 100);
-
-    var bonuses = [];
-
-    if (self.crashPoint !== 0) {
-        bonuses = calcBonuses(self.players);
-
-        var givenOut = 0;
-        Object.keys(self.players).forEach(function(player) {
-            var record = self.players[player];
-
-            givenOut += record.bet * 0.01;
-            if (record.status === 'CASHED_OUT') {
-                var given = (record.stoppedAt/100) * record.bet;
-                assert(typeof given === 'number' && given > 0);
-                givenOut += given;
-            }
-        });
-
-        self.bankroll -= givenOut;
-    }
-
-    var playerInfo = self.getInfo().player_info;
-    var bonusJson = {};
-    bonuses.forEach(function(entry) {
-        bonusJson[entry.user.username] = entry.amount;
-        playerInfo[entry.user.username].bonus = entry.amount;
-    });
-
-    self.lastHash = self.hash;
-
-    // oh noes, we crashed!
-    self.emit('game_crash', {
-        forced: forced,
-        elapsed: self.gameDuration,
-        game_crash: self.crashPoint, // We send 0 to client in instant crash
-        bonuses: bonusJson,
-        hash: self.lastHash
-    });
-
-    self.gameHistory.addCompletedGame({
-        game_id: gameId,
-        game_crash: self.crashPoint,
-        created: self.startTime,
-        player_info: playerInfo,
-        hash: self.lastHash
-    });
-
-    self.dbEnding = true;
-    db.endGame(gameId, bonuses, function(err) {
-      if (err)
-         console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
-
-       self.dbEnding = false;
-    });
-
-    self.state = 'ENDED';
-};
 
 Game.prototype.getInfo = function() {
 
