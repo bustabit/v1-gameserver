@@ -159,8 +159,8 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 
                 givenOut += record.bet * 0.01;
                 if (record.status === 'CASHED_OUT') {
-                    var given = (record.stoppedAt/100) * record.bet;
-                    assert(typeof given === 'number' && given > 0);
+                    var given = record.stoppedAt * (record.bet / 100);
+                    assert(lib.isInt(given) && given > 0);
                     givenOut += given;
                 }
             });
