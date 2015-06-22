@@ -686,37 +686,32 @@ exports.getBankroll = function(callback) {
 
 exports.getGameHistory = function(callback) {
 
-    query('SELECT games.id game_id, games.game_crash, games.created, (array_agg(game_hashes.hash))[1] AS hash, ' +
-    ' json_agg(pv) plays ' +
+    var sql =
+        'SELECT games.id game_id, game_crash, created, ' +
+        '     (SELECT hash FROM game_hashes WHERE game_id = games.id), ' +
+        '     (SELECT to_json(array_agg(to_json(pv))) ' +
+        '        FROM (SELECT username, bet, (100 * cash_out / bet) AS stopped_at, bonus ' +
+        '              FROM plays JOIN users ON user_id = users.id WHERE game_id = games.id) pv) player_info ' +
         'FROM games ' +
-        'LEFT JOIN (SELECT users.username, plays.bet, plays.cash_out, plays.bonus, plays.game_id ' +
-        '  FROM plays, users ' +
-        '  WHERE plays.user_id = users.id) pv ON pv.game_id = games.id ' +
-        'LEFT JOIN game_hashes ON games.id = game_hashes.game_id ' +
         'WHERE games.ended = true ' +
-        'GROUP BY 1 ' +
-        'ORDER BY games.id DESC LIMIT 10;', function(err, data) {
-            if (err) throw err;
+        'ORDER BY games.id DESC LIMIT 10';
+
+    query(sql, function(err, data) {
+        if (err) throw err;
 
         data.rows.forEach(function(row) {
-                row.player_info = {};
+            // oldInfo is like: [{"username":"USER","bet":satoshis, ,..}, ..]
+            var oldInfo = row.player_info || [];
+            var newInfo = row.player_info = {};
 
-                row.plays.forEach(function(play) {
-                    if (!play) return;
-
-                    // The database does not store the stopped_at value,
-                    // so we recalculate it.
-                    var stopped_at = Math.round(100 * play.cash_out / play.bet);
-                    row.player_info[play.username] =
-                        { bet: play.bet,
-                          stopped_at: stopped_at,
-                          bonus: play.bonus
-                        };
-                });
-
-                delete row.plays;
+            oldInfo.forEach(function(play) {
+                newInfo[play.username] = {
+                    bet: play.bet,
+                    stopped_at: play.stopped_at,
+                    bonus: play.bonus
+                };
             });
-            callback(null, data.rows);
         });
+        callback(null, data.rows);
+    });
 };
-
