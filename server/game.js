@@ -39,17 +39,6 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     events.EventEmitter.call(self);
 
     function runGame() {
-        if (self.dbEnding) {
-           console.log('Last game is still ending... Wait 100ms');
-           setTimeout(runGame, 100);
-           return;
-        }
-
-        if (self.gameShuttingDown) {
-            console.log('Not creating next game, server shutting down..');
-            return;
-        }
-
 
         db.createGame(self.gameId + 1, function (err, info) {
             if (err) {
@@ -140,7 +129,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             self.cashOutAll(self.forcePoint, function (err) {
                 console.log('Just forced cashed out everyone at: ', self.forcePoint, ' got err: ', err);
 
-                crashGame(true);
+                endGame(true);
             });
             return;
         }
@@ -148,23 +137,14 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         // and run the next
 
         if (at > self.crashPoint)
-            crashGame(false);
+            endGame(false); // oh noes, we crashed!
         else
             tick(elapsed);
     }
 
-    function crashGame(forced) {
-        // oh noes, we crashed!
-        endGame(forced);
-
-        if (self.gameShuttingDown)
-            return self.emit('shutdown');
-
-        setTimeout(runGame, afterCrashTime);
-    }
-
     function endGame(forced) {
         var gameId = self.gameId;
+        var crashTime = Date.now();
 
         assert(self.crashPoint == 0 || self.crashPoint >= 100);
 
@@ -214,12 +194,25 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             hash: self.lastHash
         });
 
-        self.dbEnding = true;
-        db.endGame(gameId, bonuses, function(err) {
-          if (err)
-             console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+        var dbTimer;
+        dbTimeout();
+        function dbTimeout() {
+            dbTimer = setTimeout(function() {
+                console.log('Game', gameId, 'is still ending... Time since crash:',
+                            ((Date.now() - crashTime)/1000).toFixed(3) + 's');
+                dbTimeout();
+            }, 1000);
+        }
 
-           self.dbEnding = false;
+        db.endGame(gameId, bonuses, function(err) {
+            if (err)
+                console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+            clearTimeout(dbTimer);
+
+            if (self.gameShuttingDown)
+                self.emit('shutdown');
+            else
+                setTimeout(runGame, (crashTime + afterCrashTime) - Date.now());
         });
 
         self.state = 'ENDED';
