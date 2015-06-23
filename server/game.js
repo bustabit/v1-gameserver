@@ -39,17 +39,6 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     events.EventEmitter.call(self);
 
     function runGame() {
-        if (self.dbEnding) {
-           console.log('Last game is still ending... Wait 100ms');
-           setTimeout(runGame, 100);
-           return;
-        }
-
-        if (self.gameShuttingDown) {
-            console.log('Not creating next game, server shutting down..');
-            return;
-        }
-
 
         db.createGame(self.gameId + 1, function (err, info) {
             if (err) {
@@ -140,7 +129,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             self.cashOutAll(self.forcePoint, function (err) {
                 console.log('Just forced cashed out everyone at: ', self.forcePoint, ' got err: ', err);
 
-                crashGame(true);
+                endGame(true);
             });
             return;
         }
@@ -148,19 +137,85 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         // and run the next
 
         if (at > self.crashPoint)
-            crashGame(false);
+            endGame(false); // oh noes, we crashed!
         else
             tick(elapsed);
     }
 
-    function crashGame(forced) {
+    function endGame(forced) {
+        var gameId = self.gameId;
+        var crashTime = Date.now();
+
+        assert(self.crashPoint == 0 || self.crashPoint >= 100);
+
+        var bonuses = [];
+
+        if (self.crashPoint !== 0) {
+            bonuses = calcBonuses(self.players);
+
+            var givenOut = 0;
+            Object.keys(self.players).forEach(function(player) {
+                var record = self.players[player];
+
+                givenOut += record.bet * 0.01;
+                if (record.status === 'CASHED_OUT') {
+                    var given = record.stoppedAt * (record.bet / 100);
+                    assert(lib.isInt(given) && given > 0);
+                    givenOut += given;
+                }
+            });
+
+            self.bankroll -= givenOut;
+        }
+
+        var playerInfo = self.getInfo().player_info;
+        var bonusJson = {};
+        bonuses.forEach(function(entry) {
+            bonusJson[entry.user.username] = entry.amount;
+            playerInfo[entry.user.username].bonus = entry.amount;
+        });
+
+        self.lastHash = self.hash;
+
         // oh noes, we crashed!
-        self.endGame(forced);
+        self.emit('game_crash', {
+            forced: forced,
+            elapsed: self.gameDuration,
+            game_crash: self.crashPoint, // We send 0 to client in instant crash
+            bonuses: bonusJson,
+            hash: self.lastHash
+        });
 
-        if (self.gameShuttingDown)
-            return self.emit('shutdown');
+        self.gameHistory.addCompletedGame({
+            game_id: gameId,
+            game_crash: self.crashPoint,
+            created: self.startTime,
+            player_info: playerInfo,
+            hash: self.lastHash
+        });
 
-        setTimeout(runGame, afterCrashTime);
+        var dbTimer;
+        dbTimeout();
+        function dbTimeout() {
+            dbTimer = setTimeout(function() {
+                console.log('Game', gameId, 'is still ending... Time since crash:',
+                            ((Date.now() - crashTime)/1000).toFixed(3) + 's');
+                dbTimeout();
+            }, 1000);
+        }
+
+        db.endGame(gameId, bonuses, function(err) {
+            if (err)
+                console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+            clearTimeout(dbTimer);
+
+            if (self.gameShuttingDown)
+                self.emit('shutdown');
+            else
+                setTimeout(runGame, (crashTime + afterCrashTime) - Date.now());
+        });
+
+        self.state = 'ENDED';
     }
 
     function tick(elapsed) {
@@ -172,70 +227,6 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 }
 
 util.inherits(Game, events.EventEmitter);
-
-Game.prototype.endGame = function(forced) {
-    var self = this;
-
-    var gameId = self.gameId;
-
-    assert(self.crashPoint == 0 || self.crashPoint >= 100);
-
-    var bonuses = [];
-
-    if (self.crashPoint !== 0) {
-        bonuses = calcBonuses(self.players);
-
-        var givenOut = 0;
-        Object.keys(self.players).forEach(function(player) {
-            var record = self.players[player];
-
-            givenOut += record.bet * 0.01;
-            if (record.status === 'CASHED_OUT') {
-                var given = (record.stoppedAt/100) * record.bet;
-                assert(typeof given === 'number' && given > 0);
-                givenOut += given;
-            }
-        });
-
-        self.bankroll -= givenOut;
-    }
-
-    var playerInfo = self.getInfo().player_info;
-    var bonusJson = {};
-    bonuses.forEach(function(entry) {
-        bonusJson[entry.user.username] = entry.amount;
-        playerInfo[entry.user.username].bonus = entry.amount;
-    });
-
-    self.lastHash = self.hash;
-
-    // oh noes, we crashed!
-    self.emit('game_crash', {
-        forced: forced,
-        elapsed: self.gameDuration,
-        game_crash: self.crashPoint, // We send 0 to client in instant crash
-        bonuses: bonusJson,
-        hash: self.lastHash
-    });
-
-    self.gameHistory.addCompletedGame({
-        game_id: gameId,
-        game_crash: self.crashPoint,
-        created: self.startTime,
-        player_info: playerInfo,
-        hash: self.lastHash
-    });
-
-    self.dbEnding = true;
-    db.endGame(gameId, bonuses, function(err) {
-      if (err)
-         console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
-
-       self.dbEnding = false;
-    });
-
-    self.state = 'ENDED';
-};
 
 Game.prototype.getInfo = function() {
 
