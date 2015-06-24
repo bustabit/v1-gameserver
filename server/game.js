@@ -329,7 +329,8 @@ Game.prototype.doCashOut = function(play, at, callback) {
     self.players[username].status = 'CASHED_OUT';
     self.players[username].stoppedAt = at;
 
-    var won = Math.round(self.players[username].bet * (at / 100));
+    var won = (self.players[username].bet / 100) * at;
+    assert(lib.isInt(won));
 
     self.emit('cashed_out', {
         username: username,
