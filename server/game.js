@@ -6,6 +6,7 @@ var util = require('util');
 var _ = require('lodash');
 var lib = require('./lib');
 var SortedArray = require('./sorted_array');
+var config = require('./config');
 
 var tickRate = 150; // ping the client every X miliseconds
 var afterCrashTime = 3000; // how long from game_crash -> game_starting
@@ -52,9 +53,9 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             self.state = 'STARTING';
             self.crashPoint = info.crashPoint;
 
-            if (process.env.CRASH_AT) {
-                assert(process.env.NODE_ENV  !== 'production');
-                self.crashPoint = parseInt(process.env.CRASH_AT);
+            if (config.CRASH_AT) {
+                assert(!config.PRODUCTION);
+                self.crashPoint = parseInt(config.CRASH_AT);
             }
 
             self.hash = info.hash;

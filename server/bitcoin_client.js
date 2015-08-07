@@ -1,15 +1,15 @@
 var bitcoin = require('bitcoin');
 var fs = require('fs');
-
+var config = require('./config');
 
 var client = new bitcoin.Client({
-    host: process.env.BITCOIND_HOST,
-    port: process.env.BITCOIND_PORT || 8332,
-    user: process.env.BITCOIND_USER,
-    pass: process.env.BITCOIND_PASS,
+    host: config.bitcoind.BITCOIND_HOST,
+    port: config.bitcoind.BITCOIND_PORT,
+    user: config.bitcoind.BITCOIND_USER,
+    pass: config.bitcoind.BITCOIND_PASS,
     ssl: true,
     sslStrict: true,
-    sslCa: fs.readFileSync(process.env.BITCOIND_CERT)
+    sslCa: fs.readFileSync(config.bitcoind.CERT)
 });
 
 module.exports = client;

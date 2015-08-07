@@ -83,4 +83,3 @@ exports.crashPointFromHash = function(serverSeed) {
 
     return Math.floor((100 * e - h) / (e - h));
 };
-

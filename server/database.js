@@ -4,13 +4,12 @@ var uuid = require('uuid');
 var async = require('async');
 var lib = require('./lib');
 var pg = require('pg');
+var config = require('./config');
 
-var databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl)
+if (!config.DATABASE_URL)
     throw new Error('must set DATABASE_URL environment var');
 
-console.log('DATABASE_URL: ', databaseUrl);
+console.log('DATABASE_URL: ', config.DATABASE_URL);
 
 // Increase the client pool size. At the moment the most concurrent
 // queries are performed when auto-bettors join a newly created
@@ -38,7 +37,7 @@ pg.types.setTypeParser(1700, function(val) { // parse numeric as a float
 
 // callback is called with (err, client, done)
 function connect(callback) {
-    return pg.connect(databaseUrl, callback);
+    return pg.connect(config.DATABASE_URL, callback);
 }
 
 function query(query, params, callback) {
@@ -110,6 +109,10 @@ function getClient(runner, callback) {
 
 exports.query = query;
 
+pg.on('error', function(err) {
+    console.error('POSTGRES EMITTED AN ERROR', err);
+});
+
 // runner takes (client, callback)
 
 // callback should be called with (err, data)
@@ -159,8 +162,8 @@ exports.getUserByName = function(username, callback) {
 exports.validateOneTimeToken = function(token, callback) {
     assert(token);
 
-    query('WITH t as (DELETE FROM sessions WHERE id = $1 AND ott = TRUE RETURNING *) ' +
-        'SELECT * FROM users WHERE id = (SELECT user_id FROM t)',
+    query('WITH t as (UPDATE sessions SET expired = now() WHERE id = $1 AND ott = TRUE RETURNING *)' +
+            'SELECT * FROM users WHERE id = (SELECT user_id FROM t)',
         [token], function(err, result) {
             if (err) return callback(err);
             if (result.rowCount == 0) return callback('NOT_VALID_TOKEN');
@@ -377,6 +380,7 @@ exports.getGameHistory = function(callback) {
                 };
             });
         });
+
         callback(null, data.rows);
     });
 };
