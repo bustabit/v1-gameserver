@@ -3,7 +3,7 @@ var uuid = require('uuid');
 
 var async = require('async');
 var lib = require('./lib');
-var pg = require('pg');
+var pg = require('pg').native;
 var config = require('./config');
 
 if (!config.DATABASE_URL)
