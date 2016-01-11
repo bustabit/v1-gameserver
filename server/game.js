@@ -23,6 +23,8 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     self.crashPoint; // when the game crashes, 0 means instant crash
     self.gameDuration; // how long till the game will crash..
 
+    self.openBet = 0; // how much satoshis is still in action
+    self.totalWon = 0; // how much satoshis players won (profit)
     self.forcePoint = null; // The point we force terminate the game
 
     self.state = 'ENDED'; // 'STARTING' | 'BLOCKING' | 'IN_PROGRESS' |  'ENDED'
@@ -52,6 +54,8 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 
             self.state = 'STARTING';
             self.crashPoint = info.crashPoint;
+            self.openBet = 0;
+            self.totalWon = 0;
 
             if (config.CRASH_AT) {
                 assert(!config.PRODUCTION);
@@ -320,6 +324,7 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
             assert(playId > 0);
 
             self.bankroll += betAmount;
+            self.openBet += betAmount;
 
             var index = self.joined.insert({ user: user, bet: betAmount, autoCashOut: autoCashOut, playId: playId, status: 'PLAYING' });
 
@@ -342,14 +347,16 @@ Game.prototype.doCashOut = function(play, at, callback) {
     assert(typeof callback === 'function');
 
     var self = this;
-
     var username = play.user.username;
 
-    assert(self.players[username].status === 'PLAYING');
-    self.players[username].status = 'CASHED_OUT';
-    self.players[username].stoppedAt = at;
+    assert(play === self.players[username]);
+    assert(play.status === 'PLAYING');
+    play.status = 'CASHED_OUT';
+    play.stoppedAt = at;
 
-    var won = (self.players[username].bet / 100) * at;
+    var cashed = play.bet * at / 100;
+    var won    = play.bet * (at - 100) / 100;  // as in profit
+    assert(lib.isInt(cashed));
     assert(lib.isInt(won));
 
     self.emit('cashed_out', {
@@ -357,7 +364,10 @@ Game.prototype.doCashOut = function(play, at, callback) {
         stopped_at: at
     });
 
-    db.cashOut(play.user.id, play.playId, won, function(err) {
+    self.openBet  -= play.bet;
+    self.totalWon += won;
+
+    db.cashOut(play.user.id, play.playId, cashed, function(err) {
         if (err) {
             console.log('[INTERNAL_ERROR] could not cash out: ', username, ' at ', at, ' in ', play, ' because: ', err);
             return callback(err);
@@ -399,33 +409,37 @@ Game.prototype.runCashOuts = function(at) {
 Game.prototype.setForcePoint = function() {
    var self = this;
 
-   var totalBet = 0; // how much satoshis is still in action
-   var totalCashedOut = 0; // how much satoshis has been lost
+   if (!config.production) {
+       var openBet = 0; // how much satoshis is still in action
+       var totalWon = 0; // how much satoshis has been lost
 
-   Object.keys(self.players).forEach(function(playerName) {
-       var play = self.players[playerName];
+       Object.keys(self.players).forEach(function(playerName) {
+           var play = self.players[playerName];
 
-       if (play.status === 'CASHED_OUT') {
-           var amount = play.bet * (play.stoppedAt - 100) / 100;
-           totalCashedOut += amount;
-       } else {
-           assert(play.status == 'PLAYING');
-           assert(lib.isInt(play.bet));
-           totalBet += play.bet;
-       }
-   });
+           if (play.status === 'CASHED_OUT') {
+               var amount = play.bet * (play.stoppedAt - 100) / 100;
+               totalWon += amount;
+           } else {
+               assert(play.status == 'PLAYING');
+               assert(lib.isInt(play.bet));
+               openBet += play.bet;
+           }
+       });
 
-   if (totalBet === 0) {
+       assert(self.openBet === openBet);
+       assert(self.totalWon === totalWon);
+   }
+
+   if (self.openBet === 0) {
        self.forcePoint = Infinity; // the game can go until it crashes, there's no end.
    } else {
-       var left = self.maxWin - totalCashedOut - (totalBet * 0.01);
-
-       var ratio =  (left+totalBet) / totalBet;
+       // TODO: Subtract the bonus of all bets should instead of just the open bets.
+       var left = self.maxWin - self.totalWon - (self.openBet * 0.01);
+       var ratio = (left+self.openBet) / self.openBet;
 
        // in percent
        self.forcePoint = Math.max(Math.floor(ratio * 100), 101);
    }
-
 };
 
 Game.prototype.cashOut = function(user, callback) {
