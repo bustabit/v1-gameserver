@@ -31,8 +31,15 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     self.pending = {}; // Set of players pending a joined
     self.pendingCount = 0;
     self.joined = new SortedArray(); // A list of joins, before the game is in progress
-
     self.players = {}; // An object of userName ->  { playId: ..., autoCashOut: .... }
+
+    // An array that approximates playing users, i.e. the ones that have not yet
+    // cashed out, for O(1) auto cashouts. Plays are inserted by increasing
+    // autoCashOut order during game start and only shifted durig the game ticks
+    // up to the current multiplier. This means, at any point it contains only
+    // the players that have a higher cashout than the currenty multiplier and
+    // all other have been cashed out.
+    self.playing = [];
     self.gameId = lastGameId;
     self.gameHistory = gameHistory;
 
@@ -66,6 +73,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             self.gameId++;
             self.startTime = new Date(Date.now() + restartTime);
             self.players = {}; // An object of userName ->  { user: ..., playId: ..., autoCashOut: ...., status: ... }
+            self.playing = [];
             self.gameDuration = Math.ceil(inverseGrowth(self.crashPoint + 1)); // how long till the game will crash..
             self.maxWin = Math.round(self.bankroll * 0.03); // Risk 3% per game
 
@@ -99,7 +107,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         self.pendingCount = 0;
 
         var bets = {};
-        var arr = self.joined.getArray();
+        var arr = self.playing = self.joined.getArray();
         for (var i = 0; i < arr.length; ++i) {
             var a = arr[i];
             bets[a.user.username] = a.bet;
@@ -107,6 +115,9 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         }
 
         self.joined.clear();
+        self.playing.sort(function(a,b) {
+          return a.autoCashOut - b.autoCashOut;
+        });
 
         self.emit('game_started', bets);
 
@@ -379,26 +390,25 @@ Game.prototype.doCashOut = function(play, at, callback) {
 
 Game.prototype.runCashOuts = function(at) {
     var self = this;
+    var update = false; // Check for auto cashouts
 
-    var update = false;
-    // Check for auto cashouts
-
-    Object.keys(self.players).forEach(function (playerUserName) {
-        var play = self.players[playerUserName];
-
+    dropWhile(self.playing, function(play) {
+        // Strip cashed players from the array
         if (play.status === 'CASHED_OUT')
-            return;
+            return true;
 
         assert(play.status === 'PLAYING');
         assert(play.autoCashOut);
 
         if (play.autoCashOut <= at && play.autoCashOut <= self.crashPoint && play.autoCashOut <= self.forcePoint) {
-
             self.doCashOut(play, play.autoCashOut, function (err) {
                 if (err)
-                    console.log('[INTERNAL_ERROR] could not auto cashout ', playerUserName, ' at ', play.autoCashOut);
+                    console.log('[INTERNAL_ERROR] could not auto cashout ', play.username, ' at ', play.autoCashOut);
             });
             update = true;
+            return true; // Drop from self.playing
+        } else {
+            return false; // Don't drop this one and stop dropping here
         }
     });
 
@@ -613,6 +623,10 @@ function growthFunc(ms) {
 function inverseGrowth(result) {
     var c = 16666.666667;
     return c * Math.log(0.01 * result);
+}
+
+function dropWhile(arr, pred) {
+  for (var l = arr.length; l > 0 && pred(arr[0]); --l, arr.shift()) ;
 }
 
 module.exports = Game;
