@@ -9,14 +9,17 @@ module.exports = function(server,game) {
 
     (function() {
         function on(event) {
-            game.on(event, function (data) {
-                io.to('joined').emit(event, data);
+            game.on(event, function () {
+                var room = io.to('joined');
+                var args = Array.prototype.slice.call(arguments);
+                args.unshift(event);
+                room.emit.apply(room, args);
             });
         }
 
         on('game_starting');
         on('game_started');
-        on('game_tick');
+        on('tick');
         on('game_crash');
         on('cashed_out');
         on('player_bet');
