@@ -9,6 +9,8 @@ module.exports = {
     PRODUCTION: process.env.NODE_ENV  === 'production',
     GAME_HISTORY_LENGTH: 50,
 
+    GAME_API_VERSION: 1,
+
     //Do not set any of this on production
 
     CRASH_AT: process.env.CRASH_AT //Force the crash point

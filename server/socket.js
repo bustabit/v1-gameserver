@@ -3,6 +3,7 @@ var _ = require('lodash');
 var socketio = require('socket.io');
 var database = require('./database');
 var lib = require('./lib');
+var config =  require('./config');
 
 module.exports = function(server,game) {
     var io = socketio(server);
@@ -36,6 +37,17 @@ module.exports = function(server,game) {
             if (typeof info !== 'object')
                 return sendError(socket, '[join] Invalid info');
 
+            if (!lib.hasOwnProperty(info, 'api_version'))
+                return sendError(socket, '[join] No api version given');
+
+            if (typeof info.api_version !== 'number')
+                return sendError(socket, '[join] Invalid api version');
+
+            if (info.api_version < config.GAME_API_VERSION)
+                return sendError(socket,
+                  '[join] Incompatible api version. Server version: ' +
+                  config.GAME_API_VERSION);
+
             var ott = info.ott;
             if (ott) {
                 if (!lib.isUUIDv4(ott))
@@ -61,6 +73,7 @@ module.exports = function(server,game) {
                 }
 
                 var res = game.getInfo();
+                res['api_version'] = config.GAME_API_VERSION;
                 res['chat'] = []; // TODO: remove after getting rid of play-old
                 // Strip all player info except for this user.
                 res['table_history'] = game.gameHistory.getHistory().map(function(game) {
