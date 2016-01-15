@@ -22,7 +22,7 @@ module.exports = function(server,game) {
         on('tick');
         on('game_crash');
         on('cashed_out');
-        on('player_bet');
+        on('bets');
     })();
 
     io.on('connection', onConnection);

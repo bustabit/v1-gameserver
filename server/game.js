@@ -360,13 +360,15 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
             self.bankroll += betAmount;
             self.openBet += betAmount;
 
-            var index = self.joined.insert({ user: user, bet: betAmount, autoCashOut: autoCashOut, playId: playId, status: 'PLAYING' });
-
-            self.emit('player_bet',  {
-                username: user.username,
-                index: index
+            var index = self.joined.insert({
+              user: user,
+              bet: betAmount,
+              autoCashOut: autoCashOut,
+              playId: playId,
+              status: 'PLAYING'
             });
 
+            self.emit('bets', [index, user.username]);
             callback(null);
         }
     });
