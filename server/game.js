@@ -292,7 +292,7 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
         self.pendingCount--;
 
         if (err) {
-            if (err.code == '23514') // constraint violation
+            if (err.code == '23514' || err.sqlState == '23514') // constraint violation
                 return callback('NOT_ENOUGH_MONEY');
 
             console.log('[INTERNAL_ERROR] could not play game, got error: ', err);

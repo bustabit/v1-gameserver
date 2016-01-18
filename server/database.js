@@ -54,7 +54,7 @@ function query(query, params, callback) {
             client.query(query, params, function(err, result) {
                 done();
                 if (err) {
-                    if (err.code === '40P01') {
+                    if (err.code === '40P01' || err.sqlState === '40P01') {
                         console.log('Warning: Retrying deadlocked transaction: ', query, params);
                         return doIt();
                     }
@@ -77,7 +77,7 @@ function getClient(runner, callback) {
             function rollback(err) {
                 client.query('ROLLBACK', done);
 
-                if (err.code === '40P01') {
+                if (err.code === '40P01' || err.sqlState === '40P01') {
                     console.log('Warning: Retrying deadlocked transaction..');
                     return doIt();
                 }
