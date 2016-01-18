@@ -3,7 +3,7 @@ var uuid = require('uuid');
 
 var async = require('async');
 var lib = require('./lib');
-var pg = require('pg');
+var pg = require('pg').native;
 var config = require('./config');
 
 if (!config.DATABASE_URL)
@@ -14,10 +14,10 @@ console.log('DATABASE_URL: ', config.DATABASE_URL);
 // Increase the client pool size. At the moment the most concurrent
 // queries are performed when auto-bettors join a newly created
 // game. (A game is ended in a single transaction). With an average
-// of 25-35 players per game, an increase to 20 seems reasonable to
-// ensure that most queries are submitted after around 1 round-trip
+// of 90-100 players per game, an increase to 40 seems reasonable to
+// ensure that most queries are submitted after around 2 round-trip
 // waiting time or less.
-pg.defaults.poolSize = 20;
+pg.defaults.poolSize = 40;
 
 // The default timeout is 30s, or the time from 1.00x to 6.04x.
 // Considering that most of the action happens during the beginning
