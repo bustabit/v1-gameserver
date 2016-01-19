@@ -1,4 +1,5 @@
 var CBuffer = require('CBuffer');
+var _ = require('lodash');
 var socketio = require('socket.io');
 var database = require('./database');
 var lib = require('./lib');
@@ -62,7 +63,12 @@ module.exports = function(server,game,chat) {
 
                 var res = game.getInfo();
                 res['chat'] = chat.getHistory(loggedIn);
-                res['table_history'] = game.gameHistory.getHistory();
+                // Strip all player info except for this user.
+                res['table_history'] = game.gameHistory.getHistory().map(function(game) {
+                    var res = _.pick(game, ['game_id', 'game_crash', 'hash']); // Skip 'created'
+                    res.player_info = loggedIn ? _.pick(game.player_info, loggedIn.username) : {};
+                    return res;
+                });
                 res['username'] = loggedIn ? loggedIn.username : null;
                 res['balance_satoshis'] = loggedIn ? loggedIn.balance_satoshis : null;
                 ack(null, res);
