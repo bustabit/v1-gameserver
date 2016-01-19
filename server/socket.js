@@ -178,13 +178,6 @@ module.exports = function(server,game,chat) {
                 var rest = cmdMatch[2];
 
                 switch (cmd) {
-                case 'shutdown':
-                    if (loggedIn.admin) {
-                        game.shutDown();
-                    } else {
-                        return sendErrorChat(socket, 'Not an admin.');
-                    }
-                    break;
                 case 'mute':
                 case 'shadowmute':
                     if (loggedIn.moderator) {
@@ -237,6 +230,10 @@ module.exports = function(server,game,chat) {
             chat.say(socket, loggedIn, message);
         });
 
+        if (loggedIn && loggedIn.admin) {
+            socket.on('admin_pause_game', game.pause.bind(game));
+            socket.on('admin_resume_game', game.resume.bind(game));
+        }
     }
 
     function sendErrorChat(socket, message) {
