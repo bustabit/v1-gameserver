@@ -7,6 +7,7 @@ module.exports = {
     DATABASE_URL:  process.env.DATABASE_URL || "postgres://localhost:5432/bustabitdb",
     ENC_KEY: process.env.ENC_KEY || 'devkey',
     PRODUCTION: process.env.NODE_ENV  === 'production',
+    GAME_HISTORY_LENGTH: 50,
 
     //Do not set any of this on production
 

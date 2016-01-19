@@ -1,10 +1,11 @@
 var CBuffer = require('CBuffer');
+var config = require('./config');
 var database = require('./database');
 var _ = require('lodash');
 
 function GameHistory (gameTable) {
     var self = this;
-    self.gameTable = new CBuffer(20);
+    self.gameTable = new CBuffer(config.GAME_HISTORY_LENGTH);
     gameTable.forEach(function(game) {
         self.gameTable.push(game);
     });
