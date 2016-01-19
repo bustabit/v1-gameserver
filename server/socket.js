@@ -4,7 +4,7 @@ var socketio = require('socket.io');
 var database = require('./database');
 var lib = require('./lib');
 
-module.exports = function(server,game,chat) {
+module.exports = function(server,game) {
     var io = socketio(server);
 
     (function() {
@@ -21,10 +21,6 @@ module.exports = function(server,game,chat) {
         on('cashed_out');
         on('player_bet');
     })();
-
-    // Forward chat messages to clients.
-    chat.on('msg', function (msg) { io.to('joined').emit('msg', msg); });
-    chat.on('modmsg', function (msg) { io.to('moderators').emit('msg', msg); });
 
     io.on('connection', onConnection);
 
@@ -62,7 +58,7 @@ module.exports = function(server,game,chat) {
                 }
 
                 var res = game.getInfo();
-                res['chat'] = chat.getHistory(loggedIn);
+                res['chat'] = []; // TODO: remove after getting rid of play-old
                 // Strip all player info except for this user.
                 res['table_history'] = game.gameHistory.getHistory().map(function(game) {
                     var res = _.pick(game, ['game_id', 'game_crash', 'hash']); // Skip 'created'
@@ -160,89 +156,10 @@ module.exports = function(server,game,chat) {
             });
         });
 
-        socket.on('say', function(message) {
-            if (!loggedIn)
-                return sendError(socket, '[say] not logged in');
-
-            if (typeof message !== 'string')
-                return sendError(socket, '[say] no message');
-
-            if (message.length == 0 || message.length > 500)
-                return sendError(socket, '[say] invalid message side');
-
-            var cmdReg = /^\/([a-zA-z]*)\s*(.*)$/;
-            var cmdMatch = message.match(cmdReg);
-
-            if (cmdMatch) {
-                var cmd  = cmdMatch[1];
-                var rest = cmdMatch[2];
-
-                switch (cmd) {
-                case 'mute':
-                case 'shadowmute':
-                    if (loggedIn.moderator) {
-                        var muteReg = /^\s*([a-zA-Z0-9_\-]+)\s*([1-9]\d*[dhms])?\s*$/;
-                        var muteMatch = rest.match(muteReg);
-
-                        if (!muteMatch)
-                            return sendErrorChat(socket, 'Usage: /mute <user> [time]');
-
-                        var username = muteMatch[1];
-                        var timespec = muteMatch[2] ? muteMatch[2] : "30m";
-                        var shadow   = cmd === 'shadowmute';
-
-                        chat.mute(shadow, loggedIn, username, timespec,
-                                  function (err) {
-                                      if (err)
-                                          return sendErrorChat(socket, err);
-                                  });
-                    } else {
-                        return sendErrorChat(socket, 'Not a moderator.');
-                    }
-                    break;
-                case 'unmute':
-                    if (loggedIn.moderator) {
-                        var unmuteReg = /^\s*([a-zA-Z0-9_\-]+)\s*$/;
-                        var unmuteMatch = rest.match(unmuteReg);
-
-                        if (!unmuteMatch)
-                            return sendErrorChat(socket, 'Usage: /unmute <user>');
-
-                        var username = unmuteMatch[1];
-                        chat.unmute(
-                            loggedIn, username,
-                            function (err) {
-                                if (err) return sendErrorChat(socket, err);
-                            });
-                    }
-                    break;
-                default:
-                    socket.emit('msg', {
-                        time: new Date(),
-                        type: 'error',
-                        message: 'Unknown command ' + cmd
-                    });
-                    break;
-                }
-                return;
-            }
-
-            chat.say(socket, loggedIn, message);
-        });
-
         if (loggedIn && loggedIn.admin) {
             socket.on('admin_pause_game', game.pause.bind(game));
             socket.on('admin_resume_game', game.resume.bind(game));
         }
-    }
-
-    function sendErrorChat(socket, message) {
-        console.warn('Warning: sending client: ', message);
-        socket.emit('msg', {
-            time: new Date(),
-            type: 'error',
-            message: message
-        });
     }
 
     function sendError(socket, description) {

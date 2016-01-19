@@ -1,4 +1,3 @@
-var assert = require('better-assert');
 var crypto = require('crypto');
 
 exports.isUUIDv4 = function(uuid) {
@@ -15,39 +14,6 @@ exports.hasOwnProperty = function(obj, propName) {
 
 exports.getOwnProperty = function(obj, propName) {
     return Object.prototype.hasOwnProperty.call(obj, propName) ? obj[propName] : undefined;
-};
-
-exports.parseTimeString = function(str) {
-    var reg   = /^\s*([1-9]\d*)([dhms])\s*$/;
-    var match = str.match(reg);
-
-    if (!match)
-        return null;
-
-    var num = parseInt(match[1]);
-    switch (match[2]) {
-    case 'd': num *= 24;
-    case 'h': num *= 60;
-    case 'm': num *= 60;
-    case 's': num *= 1000;
-    }
-
-    assert(num > 0);
-    return num;
-};
-
-exports.printTimeString = function(ms) {
-    var days = Math.ceil(ms / (24*60*60*1000));
-    if (days >= 3) return '' + days + 'd';
-
-    var hours = Math.ceil(ms / (60*60*1000));
-    if (hours >= 3) return '' + hours + 'h';
-
-    var minutes = Math.ceil(ms / (60*1000));
-    if (minutes >= 3) return '' + minutes + 'm';
-
-    var seconds = Math.ceil(ms / 1000);
-    return '' + seconds + 's';
 };
 
 exports.genGameHash = function(serverSeed) {
