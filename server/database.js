@@ -362,9 +362,9 @@ exports.getGameHistory = function(callback) {
         '              FROM plays JOIN users ON user_id = users.id WHERE game_id = games.id) pv) player_info ' +
         'FROM games ' +
         'WHERE games.ended = true ' +
-        'ORDER BY games.id DESC LIMIT 10';
+        'ORDER BY games.id DESC LIMIT $1';
 
-    query(sql, function(err, data) {
+    query(sql, [config.GAME_HISTORY_LENGTH], function(err, data) {
         if (err) throw err;
 
         data.rows.forEach(function(row) {

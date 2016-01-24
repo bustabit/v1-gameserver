@@ -8,7 +8,6 @@ var config = require('./server/config');
 var socket = require('./server/socket');
 var database = require('./server/database');
 var Game = require('./server/game');
-var Chat = require('./server/chat');
 var GameHistory = require('./server/game_history');
 
 var _ = require('lodash');
@@ -58,8 +57,7 @@ async.parallel([
     assert(typeof lastGameId === 'number');
 
     var game = new Game(lastGameId, lastHash, bankroll, gameHistory);
-    var chat = new Chat();
 
-    socket(server, game, chat);
+    socket(server, game);
 
 });

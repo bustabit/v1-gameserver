@@ -16,9 +16,9 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     var self = this;
 
     self.bankroll = bankroll;
-    self.maxWin;
+    self.maxWin = 0;
 
-    self.gameShuttingDown = false;
+    self.controllerIsRunning = false; // if we are running games. there can still be a game in progress
     self.startTime; // time game started. If before game started, is an estimate...
     self.crashPoint; // when the game crashes, 0 means instant crash
     self.gameDuration; // how long till the game will crash..
@@ -209,22 +209,41 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             if (err)
                 console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
             clearTimeout(dbTimer);
-
-            if (self.gameShuttingDown)
-                self.emit('shutdown');
-            else
-                setTimeout(runGame, (crashTime + afterCrashTime) - Date.now());
+            scheduleNextGame(crashTime);
         });
 
         self.state = 'ENDED';
     }
 
+    function scheduleNextGame(crashTime) {
+        if (self.controllerIsRunning)
+            setTimeout(runGame, (crashTime + afterCrashTime) - Date.now());
+        else
+            console.log('Game paused');
+    }
+
+    // Hack: Assign this method here instead of putting it in the prototype,
+    // because it needs runGame() and it also has to be accessible from sockets.
+    self.resume = function() {
+        // Check if its safe to run a new game.
+        if (self.controllerIsRunning || self.state !== 'ENDED')
+            return console.log('Game still active');
+
+        console.log('Game resuming');
+        self.controllerIsRunning = true;
+        runGame();
+    };
+
+    // Hack: Just keeping together what belongs together.
+    self.pause = function() {
+        console.warn('Game is going to pause');
+        self.controllerIsRunning = false;
+    };
+
     function tick(elapsed) {
         self.emit('game_tick', elapsed);
         callTick(elapsed);
     }
-
-    runGame();
 }
 
 util.inherits(Game, events.EventEmitter);
@@ -483,18 +502,6 @@ Game.prototype.cashOutAll = function(at, callback) {
 
         callback();
     });
-};
-
-Game.prototype.shutDown = function() {
-    var self = this;
-
-    self.gameShuttingDown = true;
-    self.emit('shuttingdown');
-
-    // If the game has already ended, we can shutdown immediately.
-    if (this.state === 'ENDED') {
-        self.emit('shutdown');
-    }
 };
 
 /// returns [ {playId: ?, user: ?, amount: ? }, ...]
