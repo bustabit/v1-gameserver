@@ -23,19 +23,37 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
     self.crashPoint; // when the game crashes, 0 means instant crash
     self.gameDuration; // how long till the game will crash..
 
+    self.openBet = 0; // how much satoshis is still in action
+    self.totalWon = 0; // how much satoshis players won (profit)
     self.forcePoint = null; // The point we force terminate the game
 
     self.state = 'ENDED'; // 'STARTING' | 'BLOCKING' | 'IN_PROGRESS' |  'ENDED'
     self.pending = {}; // Set of players pending a joined
     self.pendingCount = 0;
     self.joined = new SortedArray(); // A list of joins, before the game is in progress
-
     self.players = {}; // An object of userName ->  { playId: ..., autoCashOut: .... }
+
+    // An array that approximates playing users, i.e. the ones that have not yet
+    // cashed out, for O(1) auto cashouts. Plays are inserted by increasing
+    // autoCashOut order during game start and only shifted durig the game ticks
+    // up to the current multiplier. This means, at any point it contains only
+    // the players that have a higher cashout than the currenty multiplier and
+    // all other have been cashed out.
+    self.playing = [];
     self.gameId = lastGameId;
     self.gameHistory = gameHistory;
 
     self.lastHash = lastHash;
     self.hash = null;
+
+    // Timer to schedule the next regular tick
+    self.tickTimer = null;
+
+    // An object of username -> stoppedAt
+    self.cacheCashouts = {};
+    // An array of IO tasks to perform for the cached cashouts, e.g. writing the
+    // cashouts to the database and calling the client callback.
+    self.cacheCashoutTasks = [];
 
     events.EventEmitter.call(self);
 
@@ -52,6 +70,8 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
 
             self.state = 'STARTING';
             self.crashPoint = info.crashPoint;
+            self.openBet = 0;
+            self.totalWon = 0;
 
             if (config.CRASH_AT) {
                 assert(!config.PRODUCTION);
@@ -62,6 +82,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             self.gameId++;
             self.startTime = new Date(Date.now() + restartTime);
             self.players = {}; // An object of userName ->  { user: ..., playId: ..., autoCashOut: ...., status: ... }
+            self.playing = [];
             self.gameDuration = Math.ceil(inverseGrowth(self.crashPoint + 1)); // how long till the game will crash..
             self.maxWin = Math.round(self.bankroll * 0.03); // Risk 3% per game
 
@@ -95,7 +116,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         self.pendingCount = 0;
 
         var bets = {};
-        var arr = self.joined.getArray();
+        var arr = self.playing = self.joined.getArray();
         for (var i = 0; i < arr.length; ++i) {
             var a = arr[i];
             bets[a.user.username] = a.bet;
@@ -103,45 +124,56 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         }
 
         self.joined.clear();
+        self.playing.sort(function(a,b) {
+          return a.autoCashOut - b.autoCashOut;
+        });
 
         self.emit('game_started', bets);
 
         self.setForcePoint();
 
-        callTick(0);
+        scheduleNextTick(0);
     }
 
-    function callTick(elapsed) {
+    function scheduleNextTick(elapsed) {
         var left = self.gameDuration - elapsed;
         var nextTick = Math.max(0, Math.min(left, tickRate));
 
-        setTimeout(runTick, nextTick);
+        self.tickTimer = setTimeout(self.runTick.bind(self), nextTick);
     }
 
-
-    function runTick() {
-
+    /**
+     * A tick informs clients about the elapsed time since game start and cashouts
+     * that happened since the last tick. This function gets run either by a timer
+     * after a tickRate timeout or by some user cashing out.
+     */
+    self.runTick = function() {
         var elapsed = new Date() - self.startTime;
         var at = growthFunc(elapsed);
 
         self.runCashOuts(at);
 
         if (self.forcePoint <= at && self.forcePoint <= self.crashPoint) {
-            self.cashOutAll(self.forcePoint, function (err) {
-                console.log('Just forced cashed out everyone at: ', self.forcePoint, ' got err: ', err);
+            // Max profit got hit so we forcefully end the game.
+            self.cashOutAll(self.forcePoint);
+            endGame(true);
+        } else if (at > self.crashPoint) {
+            // oh noes, we crashed!
+            endGame(false);
+        } else {
+            // The game must go on.
 
-                endGame(true);
-            });
-            return;
-        }
+            // Throw the cashouts at the client ..
+            self.emit('tick', elapsed, self.cacheCashouts);
+            self.cacheCashouts = {};
 
-        // and run the next
+            // .. and at the DB.
+            async.parallel(self.cacheCashoutTasks, function() {});
+            self.cacheCashoutTasks = [];
 
-        if (at > self.crashPoint)
-            endGame(false); // oh noes, we crashed!
-        else
-            tick(elapsed);
-    }
+            scheduleNextTick(elapsed);
+        };
+    };
 
     function endGame(forced) {
         var gameId = self.gameId;
@@ -155,9 +187,7 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             bonuses = calcBonuses(self.players);
 
             var givenOut = 0;
-            Object.keys(self.players).forEach(function(player) {
-                var record = self.players[player];
-
+            _.forEach(self.players, function(record) {
                 givenOut += record.bet * 0.01;
                 if (record.status === 'CASHED_OUT') {
                     var given = record.stoppedAt * (record.bet / 100);
@@ -181,11 +211,13 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         // oh noes, we crashed!
         self.emit('game_crash', {
             forced: forced,
+            cashouts: self.cacheCashouts,
             elapsed: self.gameDuration,
             game_crash: self.crashPoint, // We send 0 to client in instant crash
             bonuses: bonusJson,
             hash: self.lastHash
         });
+        self.cacheCashouts = {};
 
         self.gameHistory.addCompletedGame({
             game_id: gameId,
@@ -205,12 +237,23 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
             }, 1000);
         }
 
-        db.endGame(gameId, bonuses, function(err) {
-            if (err)
-                console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
-            clearTimeout(dbTimer);
-            scheduleNextGame(crashTime);
+        // Write all the remaining cashouts to the database first.
+        async.parallelLimit(self.cacheCashoutTasks, 40, function(err, results) {
+            if (err) {
+                console.log('ERROR performing cashouts at end of game', id,' got err:', err);
+                clearTimeout(dbTimer);
+                scheduleNextGame(crashTime);
+            } else {
+                // After cashouts have been written, end the game (write bonus ...)
+                db.endGame(gameId, bonuses, function(err) {
+                    if (err)
+                        console.log('ERROR could not end game id: ', gameId, ' got err: ', err);
+                    clearTimeout(dbTimer);
+                    scheduleNextGame(crashTime);
+                });
+            }
         });
+        self.cacheCashoutTasks = [];
 
         self.state = 'ENDED';
     }
@@ -239,11 +282,6 @@ function Game(lastGameId, lastHash, bankroll, gameHistory) {
         console.warn('Game is going to pause');
         self.controllerIsRunning = false;
     };
-
-    function tick(elapsed) {
-        self.emit('game_tick', elapsed);
-        callTick(elapsed);
-    }
 }
 
 util.inherits(Game, events.EventEmitter);
@@ -320,14 +358,17 @@ Game.prototype.placeBet = function(user, betAmount, autoCashOut, callback) {
             assert(playId > 0);
 
             self.bankroll += betAmount;
+            self.openBet += betAmount;
 
-            var index = self.joined.insert({ user: user, bet: betAmount, autoCashOut: autoCashOut, playId: playId, status: 'PLAYING' });
-
-            self.emit('player_bet',  {
-                username: user.username,
-                index: index
+            var index = self.joined.insert({
+              user: user,
+              bet: betAmount,
+              autoCashOut: autoCashOut,
+              playId: playId,
+              status: 'PLAYING'
             });
 
+            self.emit('bets', [index, user.username]);
             callback(null);
         }
     });
@@ -342,53 +383,60 @@ Game.prototype.doCashOut = function(play, at, callback) {
     assert(typeof callback === 'function');
 
     var self = this;
-
     var username = play.user.username;
 
-    assert(self.players[username].status === 'PLAYING');
-    self.players[username].status = 'CASHED_OUT';
-    self.players[username].stoppedAt = at;
+    assert(play === self.players[username]);
+    assert(play.status === 'PLAYING');
+    play.status = 'CASHED_OUT';
+    play.stoppedAt = at;
 
-    var won = (self.players[username].bet / 100) * at;
+    var cashed = play.bet * at / 100;
+    var won    = play.bet * (at - 100) / 100;  // as in profit
+    assert(lib.isInt(cashed));
     assert(lib.isInt(won));
 
-    self.emit('cashed_out', {
-        username: username,
-        stopped_at: at
-    });
+    self.openBet  -= play.bet;
+    self.totalWon += won;
 
-    db.cashOut(play.user.id, play.playId, won, function(err) {
-        if (err) {
-            console.log('[INTERNAL_ERROR] could not cash out: ', username, ' at ', at, ' in ', play, ' because: ', err);
-            return callback(err);
-        }
-
-        callback(null);
+    self.cacheCashouts[username] = at;
+    self.cacheCashoutTasks.push(function(cb) {
+        db.cashOut(play.user.id, play.playId, cashed, function(err) {
+            if (err) {
+                console.log('[INTERNAL_ERROR] could not cash out: ',
+                  username, ' at ', at, ' in ', play, ' because: ', err);
+                // TODO: In case of a manual cashout, this passes the error message
+                // from the DB through to the client. Is this intended / ok?
+                callback(err);
+                cb(); // Async callback
+            } else {
+                callback(null); // Client callback
+                cb(); // Async callback
+            }
+        });
     });
 };
 
 Game.prototype.runCashOuts = function(at) {
     var self = this;
+    var update = false; // Check for auto cashouts
 
-    var update = false;
-    // Check for auto cashouts
-
-    Object.keys(self.players).forEach(function (playerUserName) {
-        var play = self.players[playerUserName];
-
+    dropWhile(self.playing, function(play) {
+        // Strip cashed players from the array
         if (play.status === 'CASHED_OUT')
-            return;
+            return true;
 
         assert(play.status === 'PLAYING');
         assert(play.autoCashOut);
 
         if (play.autoCashOut <= at && play.autoCashOut <= self.crashPoint && play.autoCashOut <= self.forcePoint) {
-
             self.doCashOut(play, play.autoCashOut, function (err) {
                 if (err)
-                    console.log('[INTERNAL_ERROR] could not auto cashout ', playerUserName, ' at ', play.autoCashOut);
+                    console.log('[INTERNAL_ERROR] could not auto cashout ', play.username, ' at ', play.autoCashOut);
             });
             update = true;
+            return true; // Drop from self.playing
+        } else {
+            return false; // Don't drop this one and stop dropping here
         }
     });
 
@@ -399,33 +447,37 @@ Game.prototype.runCashOuts = function(at) {
 Game.prototype.setForcePoint = function() {
    var self = this;
 
-   var totalBet = 0; // how much satoshis is still in action
-   var totalCashedOut = 0; // how much satoshis has been lost
+   if (!config.production) {
+       var openBet = 0; // how much satoshis is still in action
+       var totalWon = 0; // how much satoshis has been lost
 
-   Object.keys(self.players).forEach(function(playerName) {
-       var play = self.players[playerName];
+       Object.keys(self.players).forEach(function(playerName) {
+           var play = self.players[playerName];
 
-       if (play.status === 'CASHED_OUT') {
-           var amount = play.bet * (play.stoppedAt - 100) / 100;
-           totalCashedOut += amount;
-       } else {
-           assert(play.status == 'PLAYING');
-           assert(lib.isInt(play.bet));
-           totalBet += play.bet;
-       }
-   });
+           if (play.status === 'CASHED_OUT') {
+               var amount = play.bet * (play.stoppedAt - 100) / 100;
+               totalWon += amount;
+           } else {
+               assert(play.status == 'PLAYING');
+               assert(lib.isInt(play.bet));
+               openBet += play.bet;
+           }
+       });
 
-   if (totalBet === 0) {
+       assert(self.openBet === openBet);
+       assert(self.totalWon === totalWon);
+   }
+
+   if (self.openBet === 0) {
        self.forcePoint = Infinity; // the game can go until it crashes, there's no end.
    } else {
-       var left = self.maxWin - totalCashedOut - (totalBet * 0.01);
-
-       var ratio =  (left+totalBet) / totalBet;
+       // TODO: Subtract the bonus of all bets should instead of just the open bets.
+       var left = self.maxWin - self.totalWon - (self.openBet * 0.01);
+       var ratio = (left+self.openBet) / self.openBet;
 
        // in percent
        self.forcePoint = Math.max(Math.floor(ratio * 100), 101);
    }
-
 };
 
 Game.prototype.cashOut = function(user, callback) {
@@ -446,6 +498,9 @@ Game.prototype.cashOut = function(user, callback) {
     if (play.autoCashOut <= at)
         at = play.autoCashOut;
 
+    // This is not entirely correct. Auto cashouts should be run first which
+    // potentially change the forcepoint and then this check should occur. If
+    // this condition is true it should also cashOutAll other players.
     if (self.forcePoint <= at)
         at = self.forcePoint;
 
@@ -456,52 +511,33 @@ Game.prototype.cashOut = function(user, callback) {
     if (play.status === 'CASHED_OUT')
         return callback('ALREADY_CASHED_OUT');
 
+    // At this point we accepted the cashout and will report it as a tick to the
+    // clients. Therefore abort the scheduled tick. Take extra care about this
+    // before adding any IO to this function as it might allow ticks in between
+    // or delay ticks until IO finishes..
+    clearTimeout(self.tickTimer);
+
     self.doCashOut(play, at, callback);
     self.setForcePoint();
+    self.runTick();
 };
 
-Game.prototype.cashOutAll = function(at, callback) {
+Game.prototype.cashOutAll = function(at) {
     var self = this;
-
-    if (this.state !== 'IN_PROGRESS')
-        return callback();
 
     console.log('Cashing everyone out at: ', at);
 
+    assert(this.state === 'IN_PROGRESS');
     assert(at >= 100);
+    assert(at <= self.crashPoint);
 
     self.runCashOuts(at);
 
-    if (at > self.crashPoint)
-        return callback(); // game already crashed, sorry guys
-
-    var tasks = [];
-
-    Object.keys(self.players).forEach(function(playerName) {
-        var play = self.players[playerName];
-
-        if (play.status === 'PLAYING') {
-            tasks.push(function (callback) {
-                if (play.status === 'PLAYING')
-                    self.doCashOut(play, at, callback);
-                else
-                    callback();
-            });
-        }
+    _.forEach(self.playing, function(play) {
+        if (play.status === 'PLAYING')
+            self.doCashOut(play, at, function() {});
     });
-
-    console.log('Needing to force cash out: ', tasks.length, ' players');
-
-    async.parallelLimit(tasks, 4, function (err) {
-        if (err) {
-            console.error('[INTERNAL_ERROR] unable to cash out all players in ', self.gameId, ' at ', at);
-            callback(err);
-            return;
-        }
-        console.log('Emergency cashed out all players in gameId: ', self.gameId);
-
-        callback();
-    });
+    self.playing = [];
 };
 
 /// returns [ {playId: ?, user: ?, amount: ? }, ...]
@@ -599,6 +635,10 @@ function growthFunc(ms) {
 function inverseGrowth(result) {
     var c = 16666.666667;
     return c * Math.log(0.01 * result);
+}
+
+function dropWhile(arr, pred) {
+  for (var l = arr.length; l > 0 && pred(arr[0]); --l, arr.shift()) ;
 }
 
 module.exports = Game;

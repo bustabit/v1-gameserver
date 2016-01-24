@@ -3,23 +3,27 @@ var _ = require('lodash');
 var socketio = require('socket.io');
 var database = require('./database');
 var lib = require('./lib');
+var config =  require('./config');
 
 module.exports = function(server,game) {
     var io = socketio(server);
 
     (function() {
         function on(event) {
-            game.on(event, function (data) {
-                io.to('joined').emit(event, data);
+            game.on(event, function () {
+                var room = io.to('joined');
+                var args = Array.prototype.slice.call(arguments);
+                args.unshift(event);
+                room.emit.apply(room, args);
             });
         }
 
         on('game_starting');
         on('game_started');
-        on('game_tick');
+        on('tick');
         on('game_crash');
         on('cashed_out');
-        on('player_bet');
+        on('bets');
     })();
 
     io.on('connection', onConnection);
@@ -32,6 +36,17 @@ module.exports = function(server,game) {
 
             if (typeof info !== 'object')
                 return sendError(socket, '[join] Invalid info');
+
+            if (!lib.hasOwnProperty(info, 'api_version'))
+                return sendError(socket, '[join] No api version given');
+
+            if (typeof info.api_version !== 'number')
+                return sendError(socket, '[join] Invalid api version');
+
+            if (info.api_version < config.GAME_API_VERSION)
+                return sendError(socket,
+                  '[join] Incompatible api version. Server version: ' +
+                  config.GAME_API_VERSION);
 
             var ott = info.ott;
             if (ott) {
@@ -58,6 +73,7 @@ module.exports = function(server,game) {
                 }
 
                 var res = game.getInfo();
+                res['api_version'] = config.GAME_API_VERSION;
                 res['chat'] = []; // TODO: remove after getting rid of play-old
                 // Strip all player info except for this user.
                 res['table_history'] = game.gameHistory.getHistory().map(function(game) {
